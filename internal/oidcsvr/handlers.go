@@ -3,6 +3,7 @@ package oidcsvr
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -26,8 +27,14 @@ type Handlers struct {
 	Clients ClientSource
 }
 
-func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest) (*oauth2as.TokenResponse, error) {
-	slog.Info("token handler", "clientID", req.ClientID, "scopes", req.GrantedScopes)
+func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest) (_ *oauth2as.TokenResponse, retErr error) {
+	l := slog.With("grantID", req.GrantID, "userID", req.UserID, "clientID", req.ClientID, "scopes", req.GrantedScopes)
+	l.InfoContext(ctx, "starting token handler")
+	defer func() {
+		if retErr != nil {
+			l.ErrorContext(ctx, "token handler failed", "error", retErr)
+		}
+	}()
 
 	userUUID, err := uuid.Parse(req.UserID)
 	if err != nil {
@@ -78,6 +85,12 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		resp.AccessTokenExpiry = time.Now().Add(cl.ParsedTokenValidity)
 		resp.IDTokenExpiry = time.Now().Add(cl.ParsedTokenValidity)
 	}
+
+	clJSON, err := json.Marshal(idc)
+	if err != nil {
+		return nil, fmt.Errorf("marshal client: %w", err)
+	}
+	l.Info("token handler issuing with claims", "claims", string(clJSON))
 
 	return resp, nil
 }

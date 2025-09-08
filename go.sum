@@ -99,3 +99,5 @@ google.golang.org/protobuf v1.36.8 h1:xHScyCOEuuwZEc6UtSOvPbAT4zRh0xcNRYekJwfqyM
 google.golang.org/protobuf v1.36.8/go.mod h1:fuxRtAxBytpl4zzqUh6/eyUujkJdNiuEkXntxiD/uRU=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+lds.li/oauth2ext v0.0.0-20250908121744-3a53f33d3c92 h1:9N2mRlvAZNsHRpfeWMfdBJEWjQf7+ePEOtCo+R4JoaI=
+lds.li/oauth2ext v0.0.0-20250908121744-3a53f33d3c92/go.mod h1:CnhiaWmapG4ReT+NbII3i2ZRcMzJm6huj3x/oeK/lbw=

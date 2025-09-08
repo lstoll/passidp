@@ -43,6 +43,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
+	lds.li/oauth2ext v0.0.0-20250908121744-3a53f33d3c92 // indirect
 )
 
 replace crawshaw.dev/jsonfile => github.com/sr/jsonfile v0.0.0-20240301210704-69e8a5b5b148

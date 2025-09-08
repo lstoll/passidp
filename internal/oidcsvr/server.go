@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 
@@ -52,6 +53,17 @@ func (s *Server) HandleAuthorizationRequest(ctx context.Context, w web.ResponseW
 	if err != nil {
 		return err
 	}
+
+	slog.InfoContext(ctx,
+		"starting authorization request",
+		"clientID", authReq.ClientID,
+		"redirectURI", authReq.RedirectURI,
+		"state", authReq.State,
+		"scopes", authReq.Scopes,
+		"codeChallenge", authReq.CodeChallenge,
+		"acrValues", authReq.ACRValues,
+		"raw", authReq.Raw,
+	)
 
 	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok {
@@ -149,5 +161,10 @@ func (s Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, 
 	if err != nil {
 		return "", fmt.Errorf("grant auth: %w", err)
 	}
+
+	// TODO - GrantAuth should return the grant ID, might be useful?
+
+	slog.InfoContext(ctx, "created grant", "userID", userID, "clientID", request.ClientID, "scopes", request.Scopes)
+
 	return redir, nil
 }

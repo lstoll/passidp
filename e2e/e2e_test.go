@@ -30,6 +30,7 @@ import (
 	"golang.org/x/oauth2"
 	clitoken "lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/oidc"
+	"lds.li/oauth2ext/provider"
 	dbpkg "lds.li/webauthn-oidc-idp/db"
 	"lds.li/webauthn-oidc-idp/internal/admincli"
 	"lds.li/webauthn-oidc-idp/internal/clients"
@@ -172,7 +173,7 @@ func TestE2E(t *testing.T) {
 		t.Fatal("server startup timed out")
 	}
 
-	provider, err := oidc.DiscoverProvider(ctx, issU.String())
+	provider, err := provider.DiscoverOIDCProvider(ctx, issU.String())
 	if err != nil {
 		t.Fatal(err)
 	}

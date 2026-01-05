@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lstoll/tinkrotate"
-	tinkrotatev1 "github.com/lstoll/tinkrotate/proto/tinkrotate/v1"
-	tinkjwt "github.com/tink-crypto/tink-go/v2/jwt"
+	"github.com/tink-crypto/tink-go/v2/jwt"
+	"github.com/tink-crypto/tink-go/v2/keyset"
 	"github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
 	"google.golang.org/protobuf/types/known/durationpb"
-	oidcjwt "lds.li/oauth2ext/jwt"
 	"lds.li/oauth2ext/oauth2as"
+	"lds.li/tinkrotate"
+	tinkrotatev1 "lds.li/tinkrotate/proto/tinkrotate/v1"
+	"lds.li/tinkrotate/sqlstore"
 )
 
 type Keyset struct {
@@ -32,14 +33,14 @@ const (
 
 var (
 	oidcRotatePolicy = &tinkrotatev1.RotationPolicy{
-		KeyTemplate:         tinkjwt.RS256_2048_F4_Key_Template(),
+		KeyTemplate:         jwt.RS256_2048_F4_Key_Template(),
 		PrimaryDuration:     durationpb.New(24 * time.Hour),
 		PropagationTime:     durationpb.New(6 * time.Hour),
 		PhaseOutDuration:    durationpb.New(24 * time.Hour),
 		DeletionGracePeriod: durationpb.New(0),
 	}
 	oidcES256RotatePolicy = &tinkrotatev1.RotationPolicy{
-		KeyTemplate:         tinkjwt.ES256Template(),
+		KeyTemplate:         jwt.ES256Template(),
 		PrimaryDuration:     durationpb.New(24 * time.Hour),
 		PropagationTime:     durationpb.New(6 * time.Hour),
 		PhaseOutDuration:    durationpb.New(24 * time.Hour),
@@ -48,8 +49,8 @@ var (
 )
 
 func initKeysets(ctx context.Context, db *sql.DB) (oidcKeyset *KeysetSigner, _ error) {
-	store, err := tinkrotate.NewSQLStore(db, &tinkrotate.SQLStoreOptions{
-		Dialect:   tinkrotate.SQLDialectSQLite,
+	store, err := sqlstore.NewSQLStore(db, &sqlstore.SQLStoreOptions{
+		Dialect:   sqlstore.SQLDialectSQLite,
 		TableName: "tink_keysets",
 	})
 	if err != nil {
@@ -73,48 +74,113 @@ func initKeysets(ctx context.Context, db *sql.DB) (oidcKeyset *KeysetSigner, _ e
 
 	autoRotator.Start(ctx)
 
-	return &KeysetSigner{algKeysets: map[oidcjwt.SigningAlg]string{
-		oidcjwt.SigningAlgRS256: keysetIDOIDC,
-		oidcjwt.SigningAlgES256: keysetIDOIDCES256,
-	}, store: store}, nil
+	pf := tinkrotate.NewPrimitiveSource(store, 0)
+
+	return &KeysetSigner{
+		defaultAlg: "RS256",
+		algKeysets: map[string]string{
+			"RS256": keysetIDOIDC,
+			"ES256": keysetIDOIDCES256,
+		},
+		primitiveSource: pf,
+		// TODO - should the primitive factory be able to return handles?
+		store: store,
+	}, nil
 }
 
-var _ oauth2as.AlgorithmSigner = (*KeysetSigner)(nil)
+var (
+	_ oauth2as.AlgorithmSigner = (*KeysetSigner)(nil)
+	_ jwt.Verifier             = (*KeysetSigner)(nil)
+)
 
 // KeysetSigner can retrieve handles for the given keyset from the DB.
 type KeysetSigner struct {
+	// defaultAlg is the default algorithm to use for signing, when no algorithm is specified.
+	defaultAlg string
 	// algKeysets maps an algorithm to the keyset ID for that algorithm.
-	algKeysets map[oidcjwt.SigningAlg]string
+	algKeysets map[string]string
 	// store is the store for the keysets.
 	store tinkrotate.Store
+	// primitiveSource is used to create signing primitives. Verification is
+	// done manually due to the need to merge verification handles.
+	primitiveSource *tinkrotate.PrimitiveSource
 }
 
-func (k *KeysetSigner) SignWithAlgorithm(ctx context.Context, alg, typHdr string, payload []byte) (string, error) {
-	id, ok := k.algKeysets[oidcjwt.SigningAlg(alg)]
+func (k *KeysetSigner) SignAndEncode(rawJWT *jwt.RawJWT) (string, error) {
+	return k.SignAndEncodeForAlgorithm(k.defaultAlg, rawJWT)
+}
+
+func (k *KeysetSigner) SignAndEncodeForAlgorithm(alg string, rawJWT *jwt.RawJWT) (string, error) {
+	ksid, ok := k.algKeysets[alg]
 	if !ok {
 		return "", fmt.Errorf("no keyset for algorithm %s", alg)
 	}
-	h, err := k.store.GetCurrentHandle(ctx, id)
+	signer, err := k.primitiveSource.GetSigner(ksid)
 	if err != nil {
-		return "", fmt.Errorf("get current handle: %w", err)
+		return "", fmt.Errorf("get signer: %w", err)
 	}
-
-	signer, err := tinkjwt.NewSigner(h)
-	if err != nil {
-		return "", fmt.Errorf("new signer: %w", err)
-	}
-
-	var th *string
-	if typHdr != "" {
-		th = &typHdr
-	}
-
-	rawJWT, err := tinkjwt.NewRawJWTFromJSON(th, payload)
-	if err != nil {
-		return "", fmt.Errorf("new raw jwt: %w", err)
-	}
-
 	return signer.SignAndEncode(rawJWT)
+}
+
+func (k *KeysetSigner) VerifyAndDecode(compact string, validator *jwt.Validator) (*jwt.VerifiedJWT, error) {
+	h, err := k.mergedVerificationHandle()
+	if err != nil {
+		return nil, fmt.Errorf("getting merged verification handle: %w", err)
+	}
+	verifier, err := jwt.NewVerifier(h)
+	if err != nil {
+		return nil, fmt.Errorf("new verifier: %w", err)
+	}
+	return verifier.VerifyAndDecode(compact, validator)
+}
+
+func (k *KeysetSigner) mergedVerificationHandle() (*keyset.Handle, error) {
+	mgr := keyset.NewManager()
+	var lastKid uint32
+	for _, id := range k.algKeysets {
+		h, err := k.store.GetPublicHandle(context.Background(), id)
+		if err != nil {
+			return nil, fmt.Errorf("get current handle: %w", err)
+		}
+		for i := range h.Len() {
+			e, err := h.Entry(i)
+			if err != nil {
+				return nil, fmt.Errorf("get entry: %w", err)
+			}
+			if _, err := mgr.AddKey(e.Key()); err != nil {
+				return nil, fmt.Errorf("add key: %w", err)
+			}
+			lastKid = e.KeyID()
+		}
+	}
+	// only using for verification so the kid isn't important, but we need one
+	// so just use the last we saw.
+	if err := mgr.SetPrimary(lastKid); err != nil {
+		return nil, fmt.Errorf("set primary: %w", err)
+	}
+	h, err := mgr.Handle()
+	if err != nil {
+		return nil, fmt.Errorf("getting merged handle: %w", err)
+	}
+	return h, nil
+}
+
+func (k *KeysetSigner) SignerForAlgorithm(ctx context.Context, alg string) (jwt.Signer, error) {
+	id, ok := k.algKeysets[alg]
+	if !ok {
+		return nil, fmt.Errorf("no keyset for algorithm %s", alg)
+	}
+	h, err := k.store.GetHandle(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get current handle: %w", err)
+	}
+
+	signer, err := jwt.NewSigner(h)
+	if err != nil {
+		return nil, fmt.Errorf("new signer: %w", err)
+	}
+
+	return signer, nil
 }
 
 // SupportedAlgorithms returns the list of algorithms supported by this
@@ -127,39 +193,18 @@ func (k *KeysetSigner) SupportedAlgorithms() []string {
 	return algs
 }
 
-func (k *KeysetSigner) GetKeysByKID(ctx context.Context, kid string) ([]oidcjwt.PublicKey, error) {
-	jwks, err := k.jwks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting JWKS: %w", err)
-	}
-	return jwks.GetKeysByKID(ctx, kid)
-}
-
-func (k *KeysetSigner) GetKeys(ctx context.Context) ([]oidcjwt.PublicKey, error) {
-	jwks, err := k.jwks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting JWKS: %w", err)
-	}
-	return jwks.GetKeys(ctx)
-}
-
-func (k *KeysetSigner) jwks(ctx context.Context) (*oidcjwt.StaticKeyset, error) {
+func (k *KeysetSigner) JWKS(ctx context.Context) ([]byte, error) {
 	mergejwksm := map[string]any{
 		"keys": []any{},
 	}
 
 	for alg, id := range k.algKeysets {
-		h, err := k.store.GetCurrentHandle(ctx, id)
+		h, err := k.store.GetPublicHandle(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("getting handle for %s: %w", alg, err)
 		}
 
-		pub, err := h.Public()
-		if err != nil {
-			return nil, fmt.Errorf("getting public handle for %s: %w", alg, err)
-		}
-
-		jwks, err := tinkjwt.JWKSetFromPublicKeysetHandle(pub)
+		jwks, err := jwt.JWKSetFromPublicKeysetHandle(h)
 		if err != nil {
 			return nil, fmt.Errorf("getting JWKS for %s: %w", alg, err)
 		}
@@ -179,5 +224,5 @@ func (k *KeysetSigner) jwks(ctx context.Context) (*oidcjwt.StaticKeyset, error) 
 		return nil, fmt.Errorf("marshalling merged JWKS: %w", err)
 	}
 
-	return oidcjwt.NewStaticKeysetFromJWKS(mergejwks)
+	return mergejwks, nil
 }

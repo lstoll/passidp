@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"lds.li/oauth2ext/jwt"
+	"github.com/tink-crypto/tink-go/v2/jwt"
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/webauthn-oidc-idp/internal/clients"
 	"lds.li/webauthn-oidc-idp/internal/queries"
@@ -26,7 +26,7 @@ type Handlers struct {
 	Clients ClientSource
 }
 
-func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest) (*oauth2as.TokenResponse, error) {
+func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest) (_ *oauth2as.TokenResponse, retErr error) {
 	slog.Info("token handler", "clientID", req.ClientID, "scopes", req.GrantedScopes)
 
 	userUUID, err := uuid.Parse(req.UserID)
@@ -51,13 +51,13 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 	}
 
 	// Extract group names for claims
-	var groupNames []string
+	var groupNames []any
 	for _, membership := range groupMemberships {
 		groupNames = append(groupNames, membership.GroupName)
 	}
 
-	idc := jwt.IDClaims{
-		Extra: map[string]any{
+	idc := jwt.RawJWTOptions{
+		CustomClaims: map[string]any{
 			"email":          user.Email,
 			"email_verified": true,
 			"picture":        gravatarURL(user.Email),
@@ -67,7 +67,7 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 	}
 
 	if cl.UseOverrideSubject && user.OverrideSubject.Valid {
-		idc.Subject = user.OverrideSubject.String
+		idc.Subject = &user.OverrideSubject.String
 	}
 
 	resp := &oauth2as.TokenResponse{
@@ -108,21 +108,27 @@ func (h *Handlers) UserinfoHandler(ctx context.Context, uireq *oauth2as.Userinfo
 		groupNames = append(groupNames, membership.GroupName)
 	}
 
-	cl := jwt.IDClaims{
-		Issuer:  h.Issuer,
-		Subject: uireq.Subject,
-		Extra:   make(map[string]any),
-	}
-	cl.Extra["email"] = user.Email
-	cl.Extra["email_verified"] = true
-	cl.Extra["picture"] = gravatarURL(user.Email) // thank u tom
-	cl.Extra["name"] = user.FullName
-	cl.Extra["groups"] = groupNames
 	nsp := strings.Split(user.FullName, " ")
-	if len(nsp) == 2 {
-		cl.Extra["given_name"] = nsp[0]
-		cl.Extra["family_name"] = nsp[1]
+	cl := struct {
+		Email         string   `json:"email"`
+		EmailVerified bool     `json:"email_verified"`
+		Picture       string   `json:"picture"`
+		Name          string   `json:"name"`
+		Groups        []string `json:"groups"`
+		GivenName     string   `json:"given_name,omitempty"`
+		FamilyName    string   `json:"family_name,omitempty"`
+	}{
+		Email:         user.Email,
+		EmailVerified: true,
+		Picture:       gravatarURL(user.Email),
+		Name:          user.FullName,
+		Groups:        groupNames,
 	}
+	if len(nsp) == 2 {
+		cl.GivenName = nsp[0]
+		cl.FamilyName = nsp[1]
+	}
+
 	return &oauth2as.UserinfoResponse{
 		Identity: &cl,
 	}, nil

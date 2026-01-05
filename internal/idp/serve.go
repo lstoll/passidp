@@ -211,13 +211,16 @@ func NewIDP(ctx context.Context, g *run.Group, sqldb *sql.DB, issuerURL *url.URL
 	}
 
 	oauth2asConfig := oauth2as.Config{
-		Issuer:  issuerURL.String(),
-		Storage: oidcsvr.NewSQLiteStorage(sqldb),
-		Clients: clients,
-		Signer:  oidcHandles,
+		Issuer:   issuerURL.String(),
+		Storage:  oidcsvr.NewSQLiteStorage(sqldb),
+		Clients:  clients,
+		Signer:   oidcHandles,
+		Verifier: oidcHandles,
 
 		TokenHandler:    oidchHandlers.TokenHandler,
 		UserinfoHandler: oidchHandlers.UserinfoHandler,
+
+		Logger: slog.With("component", "oauth2as"),
 	}
 
 	oauth2asServer, err := oauth2as.NewServer(oauth2asConfig)

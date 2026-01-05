@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/tailscale/hujson"
-	"lds.li/oauth2ext/jwt"
 	"lds.li/oauth2ext/oauth2as"
 )
 
@@ -125,10 +124,10 @@ func (c *StaticClients) ClientOpts(_ context.Context, clientID string) ([]oauth2
 				opts = append(opts, oauth2as.ClientOptSkipPKCE())
 			}
 			if cl.UseRS256 {
-				opts = append(opts, oauth2as.ClientOptSigningAlg(jwt.SigningAlgRS256))
+				opts = append(opts, oauth2as.ClientOptSigningAlg("RS256"))
 			} else {
 				// TODO - we should make the default configurable on oauth2as.Server
-				opts = append(opts, oauth2as.ClientOptSigningAlg(jwt.SigningAlgES256))
+				opts = append(opts, oauth2as.ClientOptSigningAlg("ES256"))
 			}
 			return opts, nil
 		}

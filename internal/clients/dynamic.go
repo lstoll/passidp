@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"lds.li/oauth2ext/jwt"
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
 	"lds.li/web"
@@ -116,21 +115,17 @@ func (d *DynamicClients) ClientOpts(ctx context.Context, clientID string) ([]oau
 	}
 
 	// Set signing algorithm based on client preference or default to RS256
-	var signingAlg jwt.SigningAlg
-	if registration.IDTokenSignedResponseAlg != "" {
-		switch registration.IDTokenSignedResponseAlg {
-		case "RS256":
-			signingAlg = jwt.SigningAlgRS256
-		case "ES256":
-			signingAlg = jwt.SigningAlgES256
-		default:
-			// If the client requests an unsupported algorithm, default to RS256
-			// This follows OIDC spec where the server can override client preferences
-			signingAlg = jwt.SigningAlgRS256
-		}
-	} else {
-		// Default to RS256 if no algorithm specified
-		signingAlg = jwt.SigningAlgRS256
+	var signingAlg string
+	switch registration.IDTokenSignedResponseAlg {
+	case "RS256":
+		signingAlg = "RS256"
+	case "ES256":
+		signingAlg = "ES256"
+	default:
+		// If the client requests no or an an unsupported algorithm, default
+		// to RS256 This follows OIDC spec where the server can override
+		// client preferences
+		signingAlg = "RS256"
 	}
 
 	opts = append(opts, oauth2as.ClientOptSigningAlg(signingAlg))

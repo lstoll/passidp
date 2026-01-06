@@ -3,6 +3,7 @@ module lds.li/webauthn-oidc-idp
 go 1.25
 
 require (
+	crawshaw.dev/jsonfile v0.0.0-00010101000000-000000000000
 	github.com/alecthomas/kong v1.13.0
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.2
@@ -15,6 +16,7 @@ require (
 	github.com/prometheus/common v0.67.4
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
 	github.com/tink-crypto/tink-go/v2 v2.6.0
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/oauth2 v0.34.0
 	golang.org/x/term v0.38.0
 	google.golang.org/protobuf v1.36.11
@@ -24,7 +26,6 @@ require (
 )
 
 require (
-	crawshaw.dev/jsonfile v0.0.0-00010101000000-000000000000 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
@@ -38,12 +39,10 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	go.etcd.io/bbolt v1.4.3 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect

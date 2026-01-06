@@ -39,6 +39,7 @@ type ServeCmd struct {
 	CertFile            string `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
 	KeyFile             string `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
 	CredentialStorePath string `env:"IDP_CREDENTIAL_STORE_PATH" required:"" help:"Path to the credential store file."`
+	StatePath           string `env:"IDP_STATE_PATH" required:"" help:"Path to the state file."`
 }
 
 func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) error {
@@ -50,13 +51,18 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 		return fmt.Errorf("open credential store from %s: %w", c.CredentialStorePath, err)
 	}
 
+	state, err := storage.NewState(c.StatePath)
+	if err != nil {
+		return fmt.Errorf("open state from %s: %w", c.StatePath, err)
+	}
+
 	// Create multi-clients that combines both
 	multiClients := clients.NewMultiClients(&clients.StaticClients{
 		Clients: config.Clients},
 		&clients.DynamicClients{DB: queries.New(db)},
 	)
 
-	idph, err := NewIDP(ctx, &g, config, credStore, db, config.ParsedIssuer, multiClients)
+	idph, err := NewIDP(ctx, &g, config, credStore, state, db, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
@@ -125,7 +131,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 }
 
 // NewIDP creates a new IDP server for the given params.
-func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
+func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], state *storage.State, sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
 	oidcHandles, err := initKeysets(ctx, sqldb)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
@@ -215,7 +221,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 
 	oauth2asConfig := oauth2as.Config{
 		Issuer:   issuerURL.String(),
-		Storage:  oidcsvr.NewSQLiteStorage(sqldb),
+		Storage:  state,
 		Clients:  clients,
 		Signer:   oidcHandles,
 		Verifier: oidcHandles,

@@ -93,6 +93,7 @@ func TestE2E(t *testing.T) {
 
 	/* start an instance of the server */
 	credstorePath := t.TempDir() + "/credential-store.json"
+	statePath := t.TempDir() + "/state.bolt"
 
 	port := mustAllocatePort()
 
@@ -149,6 +150,7 @@ func TestE2E(t *testing.T) {
 			CertFile:            certPath,
 			KeyFile:             keyPath,
 			CredentialStorePath: credstorePath,
+			StatePath:           statePath,
 		}
 		serveErr <- idpCmd.Run(serveCtx, config, sqldb)
 	}()

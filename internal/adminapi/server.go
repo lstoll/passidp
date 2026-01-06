@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"crawshaw.dev/jsonfile"
@@ -59,8 +60,10 @@ func (s *Server) Start(ctx context.Context, g *run.Group) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/admin/enrollments", s.handleCreateEnrollment)
-	mux.HandleFunc("/admin/enrollments/confirm", s.handleConfirmEnrollment)
+	mux.HandleFunc("POST /admin/enrollments", s.handleCreateEnrollment)
+	mux.HandleFunc("POST /admin/enrollments/confirm", s.handleConfirmEnrollment)
+	mux.HandleFunc("GET /admin/credentials", s.handleListCredentials)
+	mux.HandleFunc("DELETE /admin/credentials/", s.handleDeleteCredential)
 
 	server := &http.Server{
 		Handler:           mux,
@@ -92,11 +95,6 @@ type CreateEnrollmentResponse struct {
 }
 
 func (s *Server) handleCreateEnrollment(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req CreateEnrollmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
@@ -149,11 +147,6 @@ type ConfirmEnrollmentResponse struct {
 }
 
 func (s *Server) handleConfirmEnrollment(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req ConfirmEnrollmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
@@ -207,4 +200,95 @@ func (s *Server) handleConfirmEnrollment(w http.ResponseWriter, r *http.Request)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("encode response", slog.String("error", err.Error()))
 	}
+}
+
+type CredentialInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	UserID    string `json:"user_id"`
+	UserName  string `json:"user_name"`
+	UserEmail string `json:"user_email"`
+	CreatedAt string `json:"created_at"`
+}
+
+type ListCredentialsResponse struct {
+	Credentials []CredentialInfo `json:"credentials"`
+}
+
+func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
+	var credentials []CredentialInfo
+	s.credStore.Read(func(cs *storage.CredentialStore) {
+		for _, cred := range cs.Credentials {
+			user, err := s.config.Users.GetUser(cred.UserID)
+			userName := ""
+			userEmail := ""
+			if err == nil {
+				userName = user.FullName
+				userEmail = user.Email
+			}
+
+			credentials = append(credentials, CredentialInfo{
+				ID:        cred.ID.String(),
+				Name:      cred.Name,
+				UserID:    cred.UserID.String(),
+				UserName:  userName,
+				UserEmail: userEmail,
+				CreatedAt: cred.CreatedAt.Format(time.RFC3339),
+			})
+		}
+	})
+
+	resp := ListCredentialsResponse{
+		Credentials: credentials,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("encode response", slog.String("error", err.Error()))
+	}
+}
+
+func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
+	// Extract credential ID from path
+	path := r.URL.Path
+	prefix := "/admin/credentials/"
+	credentialIDStr, ok := strings.CutPrefix(path, prefix)
+	if !ok {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if credentialIDStr == "" {
+		http.Error(w, "credential ID required", http.StatusBadRequest)
+		return
+	}
+
+	credentialID, err := uuid.Parse(credentialIDStr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid credential_id: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	var found bool
+	if err := s.credStore.Write(func(cs *storage.CredentialStore) error {
+		for i, cred := range cs.Credentials {
+			if cred.ID == credentialID {
+				// Remove credential by swapping with last element and truncating
+				cs.Credentials[i] = cs.Credentials[len(cs.Credentials)-1]
+				cs.Credentials = cs.Credentials[:len(cs.Credentials)-1]
+				found = true
+				return nil
+			}
+		}
+		return nil
+	}); err != nil {
+		http.Error(w, fmt.Sprintf("delete credential: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if !found {
+		http.Error(w, "credential not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -132,7 +132,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 
 // NewIDP creates a new IDP server for the given params.
 func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], state *storage.State, sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
-	oidcHandles, err := initKeysets(ctx, sqldb)
+	oidcHandles, err := initKeysets(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
 	}

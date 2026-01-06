@@ -28,6 +28,9 @@ func NewState(path string) (*State, error) {
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketRefreshTokens)); err != nil {
 			return fmt.Errorf("create refresh tokens bucket: %w", err)
 		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketKeysets)); err != nil {
+			return fmt.Errorf("create keysets bucket: %w", err)
+		}
 		return nil
 	}); err != nil {
 		db.Close()

@@ -2,7 +2,6 @@ package idp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -14,7 +13,7 @@ import (
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/tinkrotate"
 	tinkrotatev1 "lds.li/tinkrotate/proto/tinkrotate/v1"
-	"lds.li/tinkrotate/sqlstore"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 type Keyset struct {
@@ -48,14 +47,8 @@ var (
 	}
 )
 
-func initKeysets(ctx context.Context, db *sql.DB) (oidcKeyset *KeysetSigner, _ error) {
-	store, err := sqlstore.NewSQLStore(db, &sqlstore.SQLStoreOptions{
-		Dialect:   sqlstore.SQLDialectSQLite,
-		TableName: "tink_keysets",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create store: %w", err)
-	}
+func initKeysets(ctx context.Context, state *storage.State) (oidcKeyset *KeysetSigner, _ error) {
+	store := storage.NewKeysetStore(state)
 
 	autoRotator, err := tinkrotate.NewAutoRotator(store, 10*time.Minute, &tinkrotate.AutoRotatorOpts{
 		ProvisionPolicies: map[string]*tinkrotatev1.RotationPolicy{

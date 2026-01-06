@@ -22,7 +22,6 @@ import (
 	"lds.li/web/proxyhdrs"
 	"lds.li/web/requestid"
 	"lds.li/web/session"
-	"lds.li/web/session/sqlkv"
 	"lds.li/webauthn-oidc-idp/internal/adminui"
 	"lds.li/webauthn-oidc-idp/internal/auth"
 	"lds.li/webauthn-oidc-idp/internal/clients"
@@ -137,10 +136,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		return nil, fmt.Errorf("initializing keysets: %w", err)
 	}
 
-	sesskv := sqlkv.New(sqldb, &sqlkv.Opts{
-		TableName: "web_sessions",
-		Dialect:   sqlkv.SQLite,
-	})
+	sesskv := storage.NewSessionKV(state)
 
 	sessionManager, err := session.NewKVManager(sesskv, nil)
 	if err != nil {

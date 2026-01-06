@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"io"
-	"os"
 	"testing"
 	"time"
 
@@ -14,16 +13,7 @@ import (
 )
 
 func TestStateOAuth2Storage(t *testing.T) {
-	// Create a temporary file for the BoltDB database
-	tmpfile, err := os.CreateTemp("", "test-state-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	tmpfile.Close()
-	defer os.Remove(tmpfile.Name())
-
-	// Create a new State instance
-	state, err := NewState(tmpfile.Name())
+	state, err := NewState(t.TempDir() + "/state.bolt")
 	if err != nil {
 		t.Fatalf("failed to create state: %v", err)
 	}

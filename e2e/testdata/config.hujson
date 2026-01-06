@@ -1,0 +1,15 @@
+{
+    "issuer": "${ISSUER_URL}",
+    "clients": [
+        {
+            "id": "test-cli",
+            "clientSecrets": [
+                "public"
+            ],
+            "public": true,
+            "redirectURLs": [
+                "http://127.0.0.1/callback",
+            ],
+        },
+    ]
+}

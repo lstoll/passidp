@@ -3,7 +3,6 @@ package clients
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,50 +10,9 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"lds.li/oauth2ext/oidcclientreg"
-	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
-func setupTestDB(t *testing.T) (*queries.Queries, func()) {
-	// Create in-memory SQLite database
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-
-	// Create the dynamic_clients table
-	_, err = db.Exec(`
-		CREATE TABLE dynamic_clients (
-			id TEXT PRIMARY KEY,
-			client_secret_hash TEXT NOT NULL,
-			registration_blob TEXT NOT NULL,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			expires_at DATETIME NOT NULL,
-			active BOOLEAN NOT NULL DEFAULT TRUE
-		);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Create indexes
-	_, err = db.Exec(`
-		CREATE INDEX idx_dynamic_clients_active_expires ON dynamic_clients(active, expires_at);
-		CREATE INDEX idx_dynamic_clients_id_active ON dynamic_clients(id, active);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create indexes: %v", err)
-	}
-
-	queriesDB := queries.New(db)
-
-	cleanup := func() {
-		db.Close()
-	}
-
-	return queriesDB, cleanup
-}
 
 func TestDynamicClients_GetClient(t *testing.T) {
 	db, cleanup := setupTestDB(t)
@@ -81,12 +39,6 @@ func TestDynamicClients_GetClient(t *testing.T) {
 	}
 }
 
-func TestDynamicClients_AddHandlers(t *testing.T) {
-	// This is a basic test that the method doesn't panic
-	// We can't easily test the web.Server integration without more setup
-	// but we can at least ensure the method exists and doesn't crash
-	t.Log("AddHandlers method exists and doesn't crash")
-}
 
 func TestDynamicClients_registerClient(t *testing.T) {
 	db, cleanup := setupTestDB(t)
@@ -95,13 +47,7 @@ func TestDynamicClients_registerClient(t *testing.T) {
 	dc := &DynamicClients{DB: db}
 
 	// Test valid client registration
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-		ClientName:      "Test Client",
-	}
+	req := defaultTestClientRequest()
 
 	reqBody, err := json.Marshal(req)
 	if err != nil {
@@ -380,34 +326,9 @@ func TestDynamicClients_GetClientMetadata(t *testing.T) {
 	}
 
 	// Test with valid dynamic client
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-		ClientName:      "Test Client",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	// Create a client directly in the database for testing
+	req := defaultTestClientRequest()
 	clientID := "dc.test-metadata"
-	clientSecretHash := "test-hash"
-	expiresAt := time.Now().AddDate(0, 0, 14)
-
-	params := queries.CreateDynamicClientParams{
-		ID:               clientID,
-		ClientSecretHash: clientSecretHash,
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        expiresAt,
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create test client: %v", err)
-	}
+	createTestDynamicClient(t, db, clientID, req)
 
 	// Test getting metadata
 	metadata, err := dc.GetClientMetadata(context.Background(), clientID)
@@ -453,32 +374,10 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	}
 
 	// Test with valid dynamic client - default algorithm (RS256)
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
+	req := defaultTestClientRequest()
+	req.ClientName = "" // Remove ClientName for this test
 	clientID := "dc.test-opts-default"
-	clientSecretHash := "test-hash"
-	expiresAt := time.Now().AddDate(0, 0, 14)
-
-	params := queries.CreateDynamicClientParams{
-		ID:               clientID,
-		ClientSecretHash: clientSecretHash,
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        expiresAt,
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create test client: %v", err)
-	}
+	createTestDynamicClient(t, db, clientID, req)
 
 	opts, err = dc.ClientOpts(context.Background(), clientID)
 	if err != nil {
@@ -491,30 +390,10 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	}
 
 	// Test with valid dynamic client - explicit RS256 algorithm
-	reqRS256 := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:             []string{"https://example.com/callback"},
-		GrantTypes:               []string{"authorization_code"},
-		ResponseTypes:            []string{"code"},
-		ApplicationType:          "web",
-		IDTokenSignedResponseAlg: "RS256",
-	}
-
-	reqBodyRS256, err := json.Marshal(reqRS256)
-	if err != nil {
-		t.Fatalf("failed to marshal RS256 request: %v", err)
-	}
-
+	reqRS256 := defaultTestClientRequest()
+	reqRS256.IDTokenSignedResponseAlg = "RS256"
 	clientIDRS256 := "dc.test-opts-rs256"
-	paramsRS256 := queries.CreateDynamicClientParams{
-		ID:               clientIDRS256,
-		ClientSecretHash: clientSecretHash,
-		RegistrationBlob: string(reqBodyRS256),
-		ExpiresAt:        expiresAt,
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), paramsRS256); err != nil {
-		t.Fatalf("failed to create RS256 test client: %v", err)
-	}
+	createTestDynamicClient(t, db, clientIDRS256, reqRS256)
 
 	optsRS256, err := dc.ClientOpts(context.Background(), clientIDRS256)
 	if err != nil {
@@ -527,30 +406,10 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	}
 
 	// Test with valid dynamic client - explicit ES256 algorithm
-	reqES256 := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:             []string{"https://example.com/callback"},
-		GrantTypes:               []string{"authorization_code"},
-		ResponseTypes:            []string{"code"},
-		ApplicationType:          "web",
-		IDTokenSignedResponseAlg: "ES256",
-	}
-
-	reqBodyES256, err := json.Marshal(reqES256)
-	if err != nil {
-		t.Fatalf("failed to marshal ES256 request: %v", err)
-	}
-
+	reqES256 := defaultTestClientRequest()
+	reqES256.IDTokenSignedResponseAlg = "ES256"
 	clientIDES256 := "dc.test-opts-es256"
-	paramsES256 := queries.CreateDynamicClientParams{
-		ID:               clientIDES256,
-		ClientSecretHash: clientSecretHash,
-		RegistrationBlob: string(reqBodyES256),
-		ExpiresAt:        expiresAt,
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), paramsES256); err != nil {
-		t.Fatalf("failed to create ES256 test client: %v", err)
-	}
+	createTestDynamicClient(t, db, clientIDES256, reqES256)
 
 	optsES256, err := dc.ClientOpts(context.Background(), clientIDES256)
 	if err != nil {
@@ -563,30 +422,10 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	}
 
 	// Test with valid dynamic client - unsupported algorithm (should default to RS256)
-	reqUnsupported := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:             []string{"https://example.com/callback"},
-		GrantTypes:               []string{"authorization_code"},
-		ResponseTypes:            []string{"code"},
-		ApplicationType:          "web",
-		IDTokenSignedResponseAlg: "PS256", // Unsupported algorithm
-	}
-
-	reqBodyUnsupported, err := json.Marshal(reqUnsupported)
-	if err != nil {
-		t.Fatalf("failed to marshal unsupported algorithm request: %v", err)
-	}
-
+	reqUnsupported := defaultTestClientRequest()
+	reqUnsupported.IDTokenSignedResponseAlg = "PS256" // Unsupported algorithm
 	clientIDUnsupported := "dc.test-opts-unsupported"
-	paramsUnsupported := queries.CreateDynamicClientParams{
-		ID:               clientIDUnsupported,
-		ClientSecretHash: clientSecretHash,
-		RegistrationBlob: string(reqBodyUnsupported),
-		ExpiresAt:        expiresAt,
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), paramsUnsupported); err != nil {
-		t.Fatalf("failed to create unsupported algorithm test client: %v", err)
-	}
+	createTestDynamicClient(t, db, clientIDUnsupported, reqUnsupported)
 
 	optsUnsupported, err := dc.ClientOpts(context.Background(), clientIDUnsupported)
 	if err != nil {

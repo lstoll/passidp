@@ -120,7 +120,7 @@ func (s Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, 
 	}
 
 	// Check required groups if any are specified
-	if len(client.RequiredGroups) > 0 {
+	if len(client.RequiredGroups()) > 0 {
 		// Get user's active group memberships
 		groupMemberships, err := s.DB.GetUserActiveGroupMemberships(ctx, userID.String())
 		if err != nil {
@@ -128,7 +128,7 @@ func (s Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, 
 		}
 
 		// Check if user is in any of the required groups
-		hasRequiredGroup := slices.ContainsFunc(client.RequiredGroups, func(requiredGroup string) bool {
+		hasRequiredGroup := slices.ContainsFunc(client.RequiredGroups(), func(requiredGroup string) bool {
 			return slices.ContainsFunc(groupMemberships, func(membership queries.GetUserActiveGroupMembershipsRow) bool {
 				return membership.GroupName == requiredGroup
 			})

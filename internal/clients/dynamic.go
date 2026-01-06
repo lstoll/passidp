@@ -20,6 +20,28 @@ import (
 	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
+// DynamicClient represents an retrieved dynamic client for the oidcsvr handler
+// to use. It is mostly a no-op wrapper, as oidcsvr handler doesn't depend on
+// any of the client details.
+type DynamicClient struct{}
+
+func (d *DynamicClient) UseOverrideSubject() bool {
+	// dynamic clients can't set subject overrides
+	return false
+}
+
+// AccessIDTokenValidity returns the validity time for access/ID tokens. If
+// 0, the default validity time will be used.
+func (d *DynamicClient) AccessIDTokenValidity() time.Duration {
+	// dynamic clients can't set their own validity time
+	return 0
+}
+
+func (d *DynamicClient) RequiredGroups() []string {
+	// dynamic clients don't have required groups
+	return nil
+}
+
 type DynamicClients struct {
 	DB *queries.Queries
 }
@@ -29,35 +51,19 @@ func (d *DynamicClients) AddHandlers(r *web.Server) {
 }
 
 // GetClient implements the ClientSource interface
-func (d *DynamicClients) GetClient(clientID string) (*Client, bool) {
+func (d *DynamicClients) GetClient(clientID string) (*DynamicClient, bool) {
 	// Only handle dynamic client IDs (prefixed with "dc.")
 	if !strings.HasPrefix(clientID, "dc.") {
 		return nil, false
 	}
 
 	ctx := context.Background()
-	dbClient, err := d.DB.GetDynamicClient(ctx, clientID)
+	_, err := d.DB.GetDynamicClient(ctx, clientID)
 	if err != nil {
 		return nil, false
 	}
 
-	// Parse the registration blob to get client details
-	var registration oidcclientreg.ClientRegistrationRequest
-	if err := json.Unmarshal([]byte(dbClient.RegistrationBlob), &registration); err != nil {
-		return nil, false
-	}
-
-	// Convert to Client struct - only include fields that are actually used by the OIDC flow
-	client := &Client{
-		ID:           dbClient.ID,
-		RedirectURLs: registration.RedirectURIs,
-		// For dynamic clients, we'll use the client secret from the registration response
-		// The actual secret validation happens in ValidateClientSecret
-		Secrets: []string{}, // Will be validated via hash comparison
-		Public:  false,      // Dynamic clients are not public by default
-	}
-
-	return client, true
+	return &DynamicClient{}, true
 }
 
 // GetClientMetadata returns the parsed client registration metadata for a given client ID

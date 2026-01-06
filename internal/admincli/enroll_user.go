@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 
 	"github.com/google/uuid"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
@@ -19,7 +19,7 @@ type EnrollUserCmd struct {
 	Output io.Writer `kong:"-"`
 }
 
-func (c *EnrollUserCmd) Run(ctx context.Context, db *sql.DB, issuerURL *url.URL) error {
+func (c *EnrollUserCmd) Run(ctx context.Context, db *sql.DB, config *config.Config) error {
 	if c.Output == nil {
 		c.Output = os.Stdout
 	}
@@ -37,6 +37,6 @@ func (c *EnrollUserCmd) Run(ctx context.Context, db *sql.DB, issuerURL *url.URL)
 	}
 
 	fmt.Fprintf(c.Output, "New user created: %s\n", params.ID)
-	fmt.Fprintf(c.Output, "Enrollment URL: %s\n", fmt.Sprintf("%s/registration?enrollment_token=%s&user_id=%s", issuerURL.String(), params.EnrollmentKey.String, params.ID))
+	fmt.Fprintf(c.Output, "Enrollment URL: %s\n", fmt.Sprintf("%s/registration?enrollment_token=%s&user_id=%s", config.Issuer, params.EnrollmentKey.String, params.ID))
 	return nil
 }

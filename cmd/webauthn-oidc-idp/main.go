@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
-	"net/url"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -18,6 +17,7 @@ import (
 	"golang.org/x/term"
 	dbpkg "lds.li/webauthn-oidc-idp/db"
 	"lds.li/webauthn-oidc-idp/internal/admincli"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/idp"
 )
 
@@ -49,11 +49,8 @@ func init() {
 var rootCmd = struct {
 	Debug bool `env:"DEBUG" help:"Enable debug logging"`
 
-	// TenantConfig //  TODO - add back a config file to list tenants for multi-tenant mode.
-	// SelectedIssuer // TODO - add back selecting an issuer for multi-tenant mode.
-
-	DBPath string `required:"" env:"IDP_DB_PATH" help:"Path to the SQLite database file."`
-	Issuer string `required:"" env:"IDP_ISSUER" help:"Issuer URL for the tenant."`
+	ConfigFile kong.NamedFileContentFlag `name:"config" required:"" env:"IDP_CONFIG_FILE" help:"Path to the config file."`
+	DBPath     string                    `required:"" env:"IDP_DB_PATH" help:"Path to the SQLite database file."`
 
 	Version kong.VersionFlag `help:"Print version information"`
 
@@ -87,13 +84,6 @@ func main() {
 		kong.Vars{"version": promversion.Version},
 	)
 
-	var err error
-	issuerURL, err := url.Parse(rootCmd.Issuer)
-	if err != nil {
-		slog.Error("parse issuer URL", slog.String("issuer", rootCmd.Issuer), slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-
 	slogOpts := &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}
@@ -107,6 +97,12 @@ func main() {
 		handler = slog.NewJSONHandler(os.Stderr, slogOpts)
 	}
 	slog.SetDefault(slog.New(handler))
+
+	config, err := config.ParseConfig(rootCmd.ConfigFile.Contents)
+	if err != nil {
+		slog.Error("parse config", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 
 	var db *sql.DB
 	{ // set up DB
@@ -135,6 +131,6 @@ func main() {
 
 	clictx.BindTo(ctx, (*context.Context)(nil))
 	clictx.Bind(db)
-	clictx.Bind(issuerURL)
+	clictx.Bind(config)
 	clictx.FatalIfErrorf(clictx.Run())
 }

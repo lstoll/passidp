@@ -6,6 +6,7 @@ import (
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
 	"lds.li/web"
+	"lds.li/webauthn-oidc-idp/internal/oidcsvr"
 )
 
 // MultiClients combines multiple client sources, with static clients taking precedence
@@ -24,7 +25,7 @@ func NewMultiClients(static *StaticClients, dynamic *DynamicClients) *MultiClien
 
 // GetClient implements the ClientSource interface
 // Static clients take precedence over dynamic clients
-func (m *MultiClients) GetClient(clientID string) (*Client, bool) {
+func (m *MultiClients) GetClient(clientID string) (oidcsvr.Client, bool) {
 	// First try static clients
 	if client, found := m.Static.GetClient(clientID); found {
 		return client, true

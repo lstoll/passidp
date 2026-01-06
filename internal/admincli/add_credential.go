@@ -1,19 +1,33 @@
 package admincli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 
-	"github.com/google/uuid"
 	"lds.li/webauthn-oidc-idp/internal/config"
 )
 
 type AddCredentialCmd struct {
-	UserID string `required:"" help:"ID of user to add credential to."`
+	UserID     string `required:"" help:"ID of user to add credential to."`
+	SocketPath string `required:"" env:"IDP_ADMIN_SOCKET_PATH" help:"Path to admin API Unix socket."`
 
 	Output io.Writer `kong:"-"`
+}
+
+type createEnrollmentRequest struct {
+	UserID string `json:"user_id"`
+}
+
+type createEnrollmentResponse struct {
+	EnrollmentID  string `json:"enrollment_id"`
+	EnrollmentKey string `json:"enrollment_key"`
+	EnrollmentURL string `json:"enrollment_url"`
 }
 
 func (c *AddCredentialCmd) Run(ctx context.Context, cfg *config.Config) error {
@@ -21,20 +35,47 @@ func (c *AddCredentialCmd) Run(ctx context.Context, cfg *config.Config) error {
 		c.Output = os.Stdout
 	}
 
-	userUUID, err := uuid.Parse(c.UserID)
-	if err != nil {
-		return fmt.Errorf("parse user-id: %w", err)
+	reqBody := createEnrollmentRequest{
+		UserID: c.UserID,
 	}
 
-	user, err := cfg.Users.GetUser(userUUID)
+	reqJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("get user: %w", err)
+		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	// this is temporary, will only exist in memory.
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", c.SocketPath)
+			},
+		},
+	}
 
-	user.EnrollmentKey = uuid.NewString()
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix/admin/enrollments", bytes.NewReader(reqJSON))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 
-	fmt.Fprintf(c.Output, "Enroll at: %s\n", fmt.Sprintf("%s/registration?enrollment_token=%s&user_id=%s", cfg.Issuer, user.EnrollmentKey, userUUID.String()))
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("call admin API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("admin API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var enrollmentResp createEnrollmentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&enrollmentResp); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	fmt.Fprintf(c.Output, "Enrollment ID: %s\n", enrollmentResp.EnrollmentID)
+	fmt.Fprintf(c.Output, "Enrollment Key: %s\n", enrollmentResp.EnrollmentKey)
+	fmt.Fprintf(c.Output, "Enroll at: %s\n", enrollmentResp.EnrollmentURL)
 	return nil
 }

@@ -45,6 +45,9 @@ func NewState(path string) (*State, error) {
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketDynamicClientsBySecret)); err != nil {
 			return fmt.Errorf("create dynamic_clients_by_secret bucket: %w", err)
 		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketPendingEnrollments)); err != nil {
+			return fmt.Errorf("create pending_enrollments bucket: %w", err)
+		}
 		return nil
 	}); err != nil {
 		db.Close()

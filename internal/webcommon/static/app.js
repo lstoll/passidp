@@ -316,17 +316,30 @@ class WebAuthnUI {
             const responseData = await result.json();
 
             if (responseData.success) {
+                // Build success message with confirmation details
+                let successMsg = responseData.message || "Passkey registered successfully!";
+                if (responseData.confirmation_key) {
+                    successMsg += `\n\nConfirmation Key: ${responseData.confirmation_key}`;
+                }
+                if (responseData.enrollment_id) {
+                    successMsg += `\nEnrollment ID: ${responseData.enrollment_id}`;
+                }
+                // Store confirmation details in data attributes for easy extraction
+                if (responseData.confirmation_key) {
+                    document.body.dataset.confirmationKey = responseData.confirmation_key;
+                }
+                if (responseData.enrollment_id) {
+                    document.body.dataset.enrollmentId = responseData.enrollment_id;
+                }
                 // Show success message
-                this.showSuccess(responseData.message || "Passkey registered successfully!");
+                this.showSuccess(successMsg);
 
-                // Redirect after a short delay
-                setTimeout(() => {
-                    if (responseData.returnTo) {
+                // Don't redirect automatically when confirmation is needed
+                if (!responseData.confirmation_key && responseData.returnTo) {
+                    setTimeout(() => {
                         window.location.href = responseData.returnTo;
-                    } else {
-                        window.location.href = '/';
-                    }
-                }, 2000);
+                    }, 2000);
+                }
             } else {
                 this.showError(responseData.error || "Registration failed");
             }

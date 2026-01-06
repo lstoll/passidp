@@ -3,7 +3,6 @@ package adminui
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
@@ -30,6 +29,7 @@ const pendingWebauthnEnrollmentSessionKey = "pending_webauthn_enrollment"
 // registration.
 type pendingWebauthnEnrollment struct {
 	ForUserID           string                `json:"for_user_id,omitempty"`
+	EnrollmentID        string                `json:"enrollment_id,omitempty"`
 	KeyName             string                `json:"key_name,omitempty"`
 	WebauthnSessionData *webauthn.SessionData `json:"webauthn_session_data,omitempty"`
 	// ReturnTo redirects the user here after the key is registered.
@@ -43,13 +43,15 @@ type registerData struct {
 type WebAuthnManager struct {
 	config    *config.Config
 	credStore *jsonfile.JSONFile[storage.CredentialStore]
+	state     *storage.State
 	webauthn  *webauthn.WebAuthn
 }
 
-func NewWebAuthnManager(config *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], webauthn *webauthn.WebAuthn) *WebAuthnManager {
+func NewWebAuthnManager(config *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], state *storage.State, webauthn *webauthn.WebAuthn) *WebAuthnManager {
 	return &WebAuthnManager{
 		config:    config,
 		credStore: credStore,
+		state:     state,
 		webauthn:  webauthn,
 	}
 }
@@ -65,23 +67,29 @@ func (w *WebAuthnManager) AddHandlers(websvr *web.Server) {
 // id as query params for an inactive user.
 func (w *WebAuthnManager) registration(ctx context.Context, rw web.ResponseWriter, req *web.Request) error {
 	// first, check the URL for a registration token and user id. If it exists,
-	// check if we have the user and if they are active/with a matching token,
-	// embed it in the page.
+	// check if we have a pending enrollment with matching token.
 	uid := req.URL().Query().Get("user_id")
 	et := req.URL().Query().Get("enrollment_token")
 	if uid != "" && et != "" {
-		// we want to enroll a user. Find them, and match the token
-		var user *config.User
-		user, err := w.config.Users.GetUserByStringID(uid)
+		// we want to enroll a user. Check for pending enrollment in state DB
+		userID, err := uuid.Parse(uid)
 		if err != nil {
-			return fmt.Errorf("get user %s: %w", uid, err)
+			return fmt.Errorf("invalid user_id: %w", err)
 		}
-		if user.EnrollmentKey == "" || subtle.ConstantTimeCompare([]byte(et), []byte(user.EnrollmentKey)) == 0 {
-			return fmt.Errorf("either previous enrollment completed fine, or invalid enrollment")
+
+		enrollment, err := w.state.GetPendingEnrollmentByKey(et)
+		if err != nil {
+			return fmt.Errorf("invalid enrollment token: %w", err)
 		}
+
+		if enrollment.UserID != userID {
+			return fmt.Errorf("enrollment user_id mismatch")
+		}
+
 		sess := session.MustFromContext(ctx)
 		sess.Set(pendingWebauthnEnrollmentSessionKey, &pendingWebauthnEnrollment{
-			ForUserID: uid,
+			ForUserID:    uid,
+			EnrollmentID: enrollment.ID.String(),
 		})
 	}
 
@@ -181,25 +189,46 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 		return fmt.Errorf("creating credential: %w", err)
 	}
 
-	if err := w.credStore.Write(func(cs *storage.CredentialStore) error {
-		cs.Credentials = append(cs.Credentials, &storage.Credential{
-			ID:             uuid.New(),
-			CredentialID:   credential.ID,
-			CredentialData: credential,
-			Name:           keyName,
-			UserID:         user.ID,
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("creating user credential: %w", err)
+	// Get the enrollment ID from session
+	if pwe.EnrollmentID == "" {
+		return fmt.Errorf("no enrollment ID in session")
 	}
 
-	// Return success response
+	enrollmentID, err := uuid.Parse(pwe.EnrollmentID)
+	if err != nil {
+		return fmt.Errorf("invalid enrollment_id: %w", err)
+	}
+
+	enrollment, err := w.state.GetPendingEnrollmentByID(enrollmentID)
+	if err != nil {
+		return fmt.Errorf("get pending enrollment: %w", err)
+	}
+
+	userID, err := uuid.Parse(pwe.ForUserID)
+	if err != nil {
+		return fmt.Errorf("invalid user_id: %w", err)
+	}
+
+	if enrollment.UserID != userID {
+		return fmt.Errorf("enrollment user_id mismatch")
+	}
+
+	// Generate confirmation key
+	confirmationKey := uuid.New().String()
+
+	// Store the credential as a pending enrollment (not active yet)
+	if err := w.state.UpdatePendingEnrollment(enrollment.ID, credential.ID, credential, keyName, confirmationKey); err != nil {
+		return fmt.Errorf("update pending enrollment: %w", err)
+	}
+
+	// Return success response with confirmation key
 	return rw.WriteResponse(req, &web.JSONResponse{
 		Data: map[string]interface{}{
-			"success":  true,
-			"message":  "Passkey registered successfully!",
-			"returnTo": returnTo,
+			"success":         true,
+			"message":         "Passkey registered successfully! Please provide the confirmation key to your administrator.",
+			"confirmation_key": confirmationKey,
+			"enrollment_id":    enrollment.ID.String(),
+			"returnTo":         returnTo,
 		},
 	})
 }

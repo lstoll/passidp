@@ -15,6 +15,10 @@ import (
 	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
+func isMigrationRequired(ctx context.Context, cfg *config.Config) bool {
+	return len(cfg.Users) == 0
+}
+
 func migrateUserData(ctx context.Context, db *sql.DB, cfg *config.Config) error {
 	if len(cfg.Users) > 0 {
 		// all good, no action needed.

@@ -50,7 +50,7 @@ var rootCmd = struct {
 	Debug bool `env:"DEBUG" help:"Enable debug logging"`
 
 	ConfigFile kong.NamedFileContentFlag `name:"config" required:"" env:"IDP_CONFIG_FILE" help:"Path to the config file."`
-	DBPath     string                    `required:"" env:"IDP_DB_PATH" help:"Path to the SQLite database file."`
+	DBPath     string                    `env:"IDP_DB_PATH" help:"Path to the SQLite database file."`
 
 	Version kong.VersionFlag `help:"Print version information"`
 
@@ -97,7 +97,7 @@ func main() {
 	}
 
 	var db *sql.DB
-	{ // set up DB
+	if rootCmd.DBPath != "" { // set up DB
 		var err error
 		db, err = sql.Open("sqlite3", rootCmd.DBPath+"?_journal=WAL")
 		if err != nil {
@@ -122,6 +122,12 @@ func main() {
 	}
 
 	// run any data migrations
+
+	if isMigrationRequired(ctx, config) && db == nil {
+		slog.Error("migration required, but no database path provided")
+		os.Exit(1)
+	}
+
 	if err := migrateUserData(ctx, db, config); err != nil {
 		slog.Error("migrate user data", slog.String("error", err.Error()))
 		os.Exit(1)

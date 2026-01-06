@@ -1,5 +1,14 @@
 {
     "issuer": "${ISSUER_URL}",
+    "users": [
+        {
+            "id": "4854735c-5a01-4a2d-b7a0-330a5b5928a9",
+            "email": "test-user@example.com",
+            "fullName": "Test User",
+            "groups": ["test-group"],
+            "webauthnHandle": "70e0b33f-9ae9-4127-824b-7ad384c0de29"
+        }
+    ],
     "clients": [
         {
             "id": "test-cli",

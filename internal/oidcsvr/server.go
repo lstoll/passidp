@@ -13,6 +13,7 @@ import (
 	"lds.li/web"
 	"lds.li/web/httperror"
 	"lds.li/webauthn-oidc-idp/internal/auth"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
@@ -35,6 +36,7 @@ type Server struct {
 	Discovery *discovery.OIDCConfigurationHandler
 	DB        *queries.Queries
 	Clients   ClientSource
+	Config    *config.Config
 }
 
 func (s *Server) AddHandlers(r *web.Server) {
@@ -112,7 +114,7 @@ func (s *Server) HandleAuthorizationRequestReturn(ctx context.Context, w web.Res
 	})
 }
 
-func (s Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, userID uuid.UUID) (returnTo string, _ error) {
+func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, userID uuid.UUID) (returnTo string, _ error) {
 	// Get client configuration
 	client, found := s.Clients.GetClient(request.ClientID)
 	if !found {
@@ -122,16 +124,14 @@ func (s Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, 
 	// Check required groups if any are specified
 	if len(client.RequiredGroups()) > 0 {
 		// Get user's active group memberships
-		groupMemberships, err := s.DB.GetUserActiveGroupMemberships(ctx, userID.String())
+		user, err := s.Config.Users.GetUser(userID)
 		if err != nil {
-			return "", fmt.Errorf("get user group memberships: %w", err)
+			return "", fmt.Errorf("get user: %w", err)
 		}
 
 		// Check if user is in any of the required groups
 		hasRequiredGroup := slices.ContainsFunc(client.RequiredGroups(), func(requiredGroup string) bool {
-			return slices.ContainsFunc(groupMemberships, func(membership queries.GetUserActiveGroupMembershipsRow) bool {
-				return membership.GroupName == requiredGroup
-			})
+			return slices.Contains(user.Groups, requiredGroup)
 		})
 
 		if !hasRequiredGroup {

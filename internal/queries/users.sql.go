@@ -7,37 +7,10 @@ package queries
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
-
-const createUser = `-- name: CreateUser :exec
-INSERT INTO users (id, email, full_name, enrollment_key, webauthn_handle, override_subject)
-VALUES (?, ?, ?, ?, ?, ?)
-`
-
-type CreateUserParams struct {
-	ID              uuid.UUID
-	Email           string
-	FullName        string
-	EnrollmentKey   sql.NullString
-	WebauthnHandle  uuid.UUID
-	OverrideSubject sql.NullString
-}
-
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
-	_, err := q.db.ExecContext(ctx, createUser,
-		arg.ID,
-		arg.Email,
-		arg.FullName,
-		arg.EnrollmentKey,
-		arg.WebauthnHandle,
-		arg.OverrideSubject,
-	)
-	return err
-}
 
 const createUserCredential = `-- name: CreateUserCredential :exec
 INSERT INTO credentials (id, user_id, name, credential_id, credential_data, created_at)
@@ -65,68 +38,13 @@ func (q *Queries) CreateUserCredential(ctx context.Context, arg CreateUserCreden
 	return err
 }
 
-const getUser = `-- name: GetUser :one
-SELECT id, email, full_name, enrollment_key, override_subject, webauthn_handle FROM users WHERE id = ?
-`
-
-func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUser, id)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.FullName,
-		&i.EnrollmentKey,
-		&i.OverrideSubject,
-		&i.WebauthnHandle,
-	)
-	return i, err
-}
-
-const getUserByOverrideSubject = `-- name: GetUserByOverrideSubject :one
-SELECT id, email, full_name, enrollment_key, override_subject, webauthn_handle FROM users WHERE override_subject = ?
-`
-
-func (q *Queries) GetUserByOverrideSubject(ctx context.Context, overrideSubject sql.NullString) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByOverrideSubject, overrideSubject)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.FullName,
-		&i.EnrollmentKey,
-		&i.OverrideSubject,
-		&i.WebauthnHandle,
-	)
-	return i, err
-}
-
-const getUserByWebauthnHandle = `-- name: GetUserByWebauthnHandle :one
-SELECT id, email, full_name, enrollment_key, override_subject, webauthn_handle FROM users WHERE webauthn_handle = ?
-`
-
-func (q *Queries) GetUserByWebauthnHandle(ctx context.Context, webauthnHandle uuid.UUID) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByWebauthnHandle, webauthnHandle)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.FullName,
-		&i.EnrollmentKey,
-		&i.OverrideSubject,
-		&i.WebauthnHandle,
-	)
-	return i, err
-}
-
 const getUserCredentials = `-- name: GetUserCredentials :many
-SELECT c.id, c.credential_id, c.user_id, c.name, c.credential_data, c.created_at FROM credentials c
-JOIN users u ON c.user_id = u.id
-WHERE u.id = ?
+SELECT id, credential_id, user_id, name, credential_data, created_at FROM credentials c
+WHERE user_id = ?
 `
 
-func (q *Queries) GetUserCredentials(ctx context.Context, id uuid.UUID) ([]Credential, error) {
-	rows, err := q.db.QueryContext(ctx, getUserCredentials, id)
+func (q *Queries) GetUserCredentials(ctx context.Context, userID uuid.UUID) ([]Credential, error) {
+	rows, err := q.db.QueryContext(ctx, getUserCredentials, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +73,12 @@ func (q *Queries) GetUserCredentials(ctx context.Context, id uuid.UUID) ([]Crede
 	return items, nil
 }
 
-const getUsers = `-- name: GetUsers :many
+const getUsersForMigration = `-- name: GetUsersForMigration :many
 SELECT id, email, full_name, enrollment_key, override_subject, webauthn_handle FROM users
 `
 
-func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.db.QueryContext(ctx, getUsers)
+func (q *Queries) GetUsersForMigration(ctx context.Context) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, getUsersForMigration)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +105,6 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
-}
-
-const setUserEnrollmentKey = `-- name: SetUserEnrollmentKey :exec
-UPDATE users SET enrollment_key = ? WHERE id = ?
-`
-
-func (q *Queries) SetUserEnrollmentKey(ctx context.Context, enrollmentKey sql.NullString, iD uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, setUserEnrollmentKey, enrollmentKey, iD)
-	return err
 }
 
 const updateCredentialDataByCredentialID = `-- name: UpdateCredentialDataByCredentialID :exec

@@ -24,6 +24,7 @@ import (
 	"lds.li/web/session"
 	"lds.li/web/webtest"
 	dbpkg "lds.li/webauthn-oidc-idp/db"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
@@ -53,6 +54,7 @@ func TestWebauthnAuth(t *testing.T) {
 	auth := &Authenticator{
 		Webauthn: wn,
 		Queries:  queries.New(sqldb),
+		Config:   &config.Config{},
 	}
 
 	t.Run("login", func(t *testing.T) {
@@ -193,19 +195,16 @@ func createUserWithCredential(t *testing.T, auth *Authenticator) (virtualwebauth
 	userID := uuid.New()
 	webauthnHandle := uuid.New()
 
-	err := auth.Queries.CreateUser(context.Background(), queries.CreateUserParams{
+	auth.Config.Users = append(auth.Config.Users, &config.User{
 		ID:             userID,
 		Email:          "test@example.com",
 		FullName:       "Test User",
 		WebauthnHandle: webauthnHandle,
 	})
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
 
 	// Create a webauthn user for registration
 	wu := &WebAuthnUser{
-		user: queries.User{
+		user: &config.User{
 			ID:             userID,
 			Email:          "test@example.com",
 			FullName:       "Test User",

@@ -21,7 +21,6 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
-	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/oklog/run"
 	"golang.org/x/oauth2"
@@ -207,40 +206,26 @@ func TestE2E(t *testing.T) {
 
 	/* start testing */
 
-	var enrolledUserID string
-
 	testOk := t.Run("Registration", func(t *testing.T) {
 		var enrollBuf bytes.Buffer
-		enrollCmd := &admincli.EnrollUserCmd{
-			Email:    "test.user@example.com",
-			FullName: "Test User",
-			Output:   &enrollBuf,
+		addCredCmd := &admincli.AddCredentialCmd{
+			UserID: "4854735c-5a01-4a2d-b7a0-330a5b5928a9",
+			Output: &enrollBuf,
 		}
-		if err := enrollCmd.Run(ctx, sqldb, config); err != nil {
+		if err := addCredCmd.Run(ctx, config); err != nil {
 			t.Fatalf("enrolling user: %v", err)
 		}
 
 		// Parse the enrollment URL from enrollBuf
 		var enrollmentURL string
 		for _, line := range strings.Split(enrollBuf.String(), "\n") {
-			if strings.HasPrefix(line, "New user created: ") {
-				enrolledUserID = strings.TrimPrefix(line, "New user created: ")
-				enrolledUserID = strings.TrimSpace(enrolledUserID)
-			}
-			if strings.HasPrefix(line, "Enrollment URL: ") {
-				enrollmentURL = strings.TrimPrefix(line, "Enrollment URL: ")
+			if strings.HasPrefix(line, "Enroll at: ") {
+				enrollmentURL = strings.TrimPrefix(line, "Enroll at: ")
 				enrollmentURL = strings.TrimSpace(enrollmentURL)
 			}
 		}
 		if enrollmentURL == "" {
 			t.Fatalf("failed to parse enrollment URL from output: %q", enrollBuf.String())
-		}
-		if enrolledUserID == "" {
-			t.Fatalf("failed to parse enrolled user ID from output: %q", enrollBuf.String())
-		}
-		enrolledUserUUID, err := uuid.Parse(enrolledUserID)
-		if err != nil {
-			t.Fatalf("parsing enrolled user ID: %v", err)
 		}
 
 		runErrC := make(chan error, 1)
@@ -272,16 +257,12 @@ func TestE2E(t *testing.T) {
 		case <-doneC:
 		}
 
-		_, err = queries.New(sqldb).GetUser(ctx, enrolledUserUUID)
+		creds, err := queries.New(sqldb).GetUserCredentials(ctx, config.Users[0].ID)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("getting user credentials: %v", err)
 		}
-		creds, err := queries.New(sqldb).GetUserCredentials(ctx, enrolledUserUUID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(creds) != 1 {
-			t.Fatalf("expected user to have 1 credential, got: %d", len(creds))
+		if len(creds) == 0 {
+			t.Fatalf("expected user to have at least 1 credential, got: %d", len(creds))
 		}
 	})
 	if !testOk {
@@ -326,43 +307,6 @@ func TestE2E(t *testing.T) {
 	clearErrchan(chromeErrC)
 
 	testOk = t.Run("Groups Test", func(t *testing.T) {
-		// Create a group
-		var createGroupBuf bytes.Buffer
-		createGroupCmd := &admincli.CreateGroupCmd{
-			Name:        "test-group",
-			Description: "Test group for e2e testing",
-			Active:      true, // Explicitly set to true
-			Output:      &createGroupBuf,
-		}
-		if err := createGroupCmd.Run(ctx, sqldb); err != nil {
-			t.Fatalf("creating group: %v", err)
-		}
-
-		// Parse the group ID from output
-		var groupID string
-		for _, line := range strings.Split(createGroupBuf.String(), "\n") {
-			if strings.HasPrefix(line, "Group created: test-group (") {
-				groupID = strings.TrimPrefix(line, "Group created: test-group (")
-				groupID = strings.TrimSuffix(groupID, ")")
-				groupID = strings.TrimSpace(groupID)
-				break
-			}
-		}
-		if groupID == "" {
-			t.Fatalf("failed to parse group ID from output: %q", createGroupBuf.String())
-		}
-
-		// Add user to the group
-		var addUserBuf bytes.Buffer
-		addUserCmd := &admincli.AddUserToGroupCmd{
-			UserID:  enrolledUserID,
-			GroupID: groupID,
-			Output:  &addUserBuf,
-		}
-		if err := addUserCmd.Run(ctx, sqldb); err != nil {
-			t.Fatalf("adding user to group: %v", err)
-		}
-
 		// Test OIDC flow to verify groups claim is included
 		tokC, loginErrC := cliLoginFlow(ctx, t, oa2Cfg)
 

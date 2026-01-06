@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tink-crypto/tink-go/v2/jwt"
 	"lds.li/oauth2ext/oauth2as"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
@@ -37,6 +38,7 @@ type ClientSource interface {
 type Handlers struct {
 	Issuer  string
 	Queries *queries.Queries
+	Config  *config.Config
 	Clients ClientSource
 }
 
@@ -48,7 +50,7 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		return nil, fmt.Errorf("parse user ID: %w", err)
 	}
 
-	user, err := h.Queries.GetUser(ctx, userUUID)
+	user, err := h.Config.Users.GetUser(userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
 	}
@@ -58,16 +60,9 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		return nil, fmt.Errorf("client %s not found", req.ClientID)
 	}
 
-	// Get user's active group memberships for claims
-	groupMemberships, err := h.Queries.GetUserActiveGroupMemberships(ctx, req.UserID)
-	if err != nil {
-		return nil, fmt.Errorf("get user group memberships: %w", err)
-	}
-
-	// Extract group names for claims
-	var groupNames []any
-	for _, membership := range groupMemberships {
-		groupNames = append(groupNames, membership.GroupName)
+	anyGroups := make([]any, len(user.Groups))
+	for i, group := range user.Groups {
+		anyGroups[i] = group
 	}
 
 	idc := jwt.RawJWTOptions{
@@ -76,12 +71,12 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 			"email_verified": true,
 			"picture":        gravatarURL(user.Email),
 			"name":           user.FullName,
-			"groups":         groupNames,
+			"groups":         anyGroups,
 		},
 	}
 
-	if cl.UseOverrideSubject() && user.OverrideSubject.Valid {
-		idc.Subject = &user.OverrideSubject.String
+	if cl.UseOverrideSubject() && user.OverrideSubject != "" {
+		idc.Subject = &user.OverrideSubject
 	}
 
 	resp := &oauth2as.TokenResponse{
@@ -105,21 +100,9 @@ func (h *Handlers) UserinfoHandler(ctx context.Context, uireq *oauth2as.Userinfo
 		return nil, fmt.Errorf("parse user ID: %w", err)
 	}
 
-	user, err := h.Queries.GetUser(ctx, userUUID)
+	user, err := h.Config.Users.GetUser(userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
-	}
-
-	// Get user's active group memberships for claims
-	groupMemberships, err := h.Queries.GetUserActiveGroupMemberships(ctx, uireq.Subject)
-	if err != nil {
-		return nil, fmt.Errorf("get user group memberships: %w", err)
-	}
-
-	// Extract group names for claims
-	var groupNames []string
-	for _, membership := range groupMemberships {
-		groupNames = append(groupNames, membership.GroupName)
 	}
 
 	nsp := strings.Split(user.FullName, " ")
@@ -136,7 +119,7 @@ func (h *Handlers) UserinfoHandler(ctx context.Context, uireq *oauth2as.Userinfo
 		EmailVerified: true,
 		Picture:       gravatarURL(user.Email),
 		Name:          user.FullName,
-		Groups:        groupNames,
+		Groups:        user.Groups,
 	}
 	if len(nsp) == 2 {
 		cl.GivenName = nsp[0]

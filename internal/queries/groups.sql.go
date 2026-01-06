@@ -11,135 +11,7 @@ import (
 	"time"
 )
 
-const addUserToGroup = `-- name: AddUserToGroup :one
-INSERT INTO user_groups (id, user_id, group_id, start_date, end_date)
-VALUES (?, ?, ?, ?, ?)
-RETURNING id, user_id, group_id, start_date, end_date, created_at
-`
-
-type AddUserToGroupParams struct {
-	ID        string
-	UserID    string
-	GroupID   string
-	StartDate time.Time
-	EndDate   sql.NullTime
-}
-
-func (q *Queries) AddUserToGroup(ctx context.Context, arg AddUserToGroupParams) (UserGroup, error) {
-	row := q.db.QueryRowContext(ctx, addUserToGroup,
-		arg.ID,
-		arg.UserID,
-		arg.GroupID,
-		arg.StartDate,
-		arg.EndDate,
-	)
-	var i UserGroup
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.GroupID,
-		&i.StartDate,
-		&i.EndDate,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const checkUserInGroup = `-- name: CheckUserInGroup :one
-SELECT COUNT(*) as count
-FROM user_groups ug
-JOIN groups g ON ug.group_id = g.id
-WHERE ug.user_id = ?
-  AND g.name = ?
-  AND g.active = TRUE
-  AND (ug.end_date IS NULL OR ug.end_date > CURRENT_TIMESTAMP)
-`
-
-func (q *Queries) CheckUserInGroup(ctx context.Context, userID string, name string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, checkUserInGroup, userID, name)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const createGroup = `-- name: CreateGroup :one
-INSERT INTO groups (id, name, description, active)
-VALUES (?, ?, ?, ?)
-RETURNING id, name, description, active, created_at, updated_at
-`
-
-type CreateGroupParams struct {
-	ID          string
-	Name        string
-	Description sql.NullString
-	Active      bool
-}
-
-func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) (Group, error) {
-	row := q.db.QueryRowContext(ctx, createGroup,
-		arg.ID,
-		arg.Name,
-		arg.Description,
-		arg.Active,
-	)
-	var i Group
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const deleteGroup = `-- name: DeleteGroup :exec
-DELETE FROM groups WHERE id = ?
-`
-
-func (q *Queries) DeleteGroup(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteGroup, id)
-	return err
-}
-
-const getGroup = `-- name: GetGroup :one
-SELECT id, name, description, active, created_at, updated_at FROM groups WHERE id = ?
-`
-
-func (q *Queries) GetGroup(ctx context.Context, id string) (Group, error) {
-	row := q.db.QueryRowContext(ctx, getGroup, id)
-	var i Group
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getGroupByName = `-- name: GetGroupByName :one
-SELECT id, name, description, active, created_at, updated_at FROM groups WHERE name = ?
-`
-
-func (q *Queries) GetGroupByName(ctx context.Context, name string) (Group, error) {
-	row := q.db.QueryRowContext(ctx, getGroupByName, name)
-	var i Group
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getUserActiveGroupMemberships = `-- name: GetUserActiveGroupMemberships :many
+const getUserActiveGroupMembershipsForMigration = `-- name: GetUserActiveGroupMembershipsForMigration :many
 SELECT ug.id, ug.user_id, ug.group_id, ug.start_date, ug.end_date, ug.created_at, g.name as group_name, g.description as group_description
 FROM user_groups ug
 JOIN groups g ON ug.group_id = g.id
@@ -149,7 +21,7 @@ WHERE ug.user_id = ?
 ORDER BY g.name
 `
 
-type GetUserActiveGroupMembershipsRow struct {
+type GetUserActiveGroupMembershipsForMigrationRow struct {
 	ID               string
 	UserID           string
 	GroupID          string
@@ -160,15 +32,15 @@ type GetUserActiveGroupMembershipsRow struct {
 	GroupDescription sql.NullString
 }
 
-func (q *Queries) GetUserActiveGroupMemberships(ctx context.Context, userID string) ([]GetUserActiveGroupMembershipsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getUserActiveGroupMemberships, userID)
+func (q *Queries) GetUserActiveGroupMembershipsForMigration(ctx context.Context, userID string) ([]GetUserActiveGroupMembershipsForMigrationRow, error) {
+	rows, err := q.db.QueryContext(ctx, getUserActiveGroupMembershipsForMigration, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetUserActiveGroupMembershipsRow
+	var items []GetUserActiveGroupMembershipsForMigrationRow
 	for rows.Next() {
-		var i GetUserActiveGroupMembershipsRow
+		var i GetUserActiveGroupMembershipsForMigrationRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
@@ -190,185 +62,4 @@ func (q *Queries) GetUserActiveGroupMemberships(ctx context.Context, userID stri
 		return nil, err
 	}
 	return items, nil
-}
-
-const getUserGroupMembership = `-- name: GetUserGroupMembership :one
-SELECT id, user_id, group_id, start_date, end_date, created_at FROM user_groups WHERE id = ?
-`
-
-func (q *Queries) GetUserGroupMembership(ctx context.Context, id string) (UserGroup, error) {
-	row := q.db.QueryRowContext(ctx, getUserGroupMembership, id)
-	var i UserGroup
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.GroupID,
-		&i.StartDate,
-		&i.EndDate,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getUserGroupMemberships = `-- name: GetUserGroupMemberships :many
-SELECT ug.id, ug.user_id, ug.group_id, ug.start_date, ug.end_date, ug.created_at, g.name as group_name, g.description as group_description
-FROM user_groups ug
-JOIN groups g ON ug.group_id = g.id
-WHERE ug.user_id = ?
-ORDER BY g.name, ug.start_date DESC
-`
-
-type GetUserGroupMembershipsRow struct {
-	ID               string
-	UserID           string
-	GroupID          string
-	StartDate        time.Time
-	EndDate          sql.NullTime
-	CreatedAt        time.Time
-	GroupName        string
-	GroupDescription sql.NullString
-}
-
-func (q *Queries) GetUserGroupMemberships(ctx context.Context, userID string) ([]GetUserGroupMembershipsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getUserGroupMemberships, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetUserGroupMembershipsRow
-	for rows.Next() {
-		var i GetUserGroupMembershipsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.UserID,
-			&i.GroupID,
-			&i.StartDate,
-			&i.EndDate,
-			&i.CreatedAt,
-			&i.GroupName,
-			&i.GroupDescription,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActiveGroups = `-- name: ListActiveGroups :many
-SELECT id, name, description, active, created_at, updated_at FROM groups WHERE active = TRUE ORDER BY name
-`
-
-func (q *Queries) ListActiveGroups(ctx context.Context) ([]Group, error) {
-	rows, err := q.db.QueryContext(ctx, listActiveGroups)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Group
-	for rows.Next() {
-		var i Group
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Description,
-			&i.Active,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listGroups = `-- name: ListGroups :many
-SELECT id, name, description, active, created_at, updated_at FROM groups ORDER BY name
-`
-
-func (q *Queries) ListGroups(ctx context.Context) ([]Group, error) {
-	rows, err := q.db.QueryContext(ctx, listGroups)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Group
-	for rows.Next() {
-		var i Group
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Description,
-			&i.Active,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const removeUserFromGroup = `-- name: RemoveUserFromGroup :exec
-UPDATE user_groups
-SET end_date = CURRENT_TIMESTAMP
-WHERE user_id = ? AND group_id = ? AND (end_date IS NULL OR end_date > CURRENT_TIMESTAMP)
-`
-
-func (q *Queries) RemoveUserFromGroup(ctx context.Context, userID string, groupID string) error {
-	_, err := q.db.ExecContext(ctx, removeUserFromGroup, userID, groupID)
-	return err
-}
-
-const updateGroup = `-- name: UpdateGroup :one
-UPDATE groups
-SET name = ?, description = ?, active = ?, updated_at = CURRENT_TIMESTAMP
-WHERE id = ?
-RETURNING id, name, description, active, created_at, updated_at
-`
-
-type UpdateGroupParams struct {
-	Name        string
-	Description sql.NullString
-	Active      bool
-	ID          string
-}
-
-func (q *Queries) UpdateGroup(ctx context.Context, arg UpdateGroupParams) (Group, error) {
-	row := q.db.QueryRowContext(ctx, updateGroup,
-		arg.Name,
-		arg.Description,
-		arg.Active,
-		arg.ID,
-	)
-	var i Group
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }

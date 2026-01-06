@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	crawshaw.dev/jsonfile v0.0.0-00010101000000-000000000000 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect

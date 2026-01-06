@@ -12,7 +12,6 @@ import (
 	"github.com/tink-crypto/tink-go/v2/jwt"
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
 // Client represents the client information that is used for our custom token
@@ -37,7 +36,6 @@ type ClientSource interface {
 
 type Handlers struct {
 	Issuer  string
-	Queries *queries.Queries
 	Config  *config.Config
 	Clients ClientSource
 }

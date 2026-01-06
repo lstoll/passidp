@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/go-webauthn/webauthn/webauthn"
 	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 func migrateUserData(ctx context.Context, db *sql.DB, cfg *config.Config) error {
@@ -56,6 +58,52 @@ func migrateUserData(ctx context.Context, db *sql.DB, cfg *config.Config) error 
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	fmt.Fprintf(os.Stdout, "%s\n", jsonData)
+
+	return nil
+}
+
+func migrateCredentials(ctx context.Context, db *sql.DB, path string) error {
+	_, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// ignore, let the migration go.
+	} else if err != nil {
+		return fmt.Errorf("stat credential store: %w", err)
+	} else {
+		// store exists, all good.
+		return nil
+	}
+
+	store, err := storage.NewCredentialStore(path)
+	if err != nil {
+		return fmt.Errorf("new credential store: %w", err)
+	}
+
+	q := queries.New(db)
+	credentials, err := q.GetCredentialsForMigration(ctx)
+	if err != nil {
+		return fmt.Errorf("get credentials for migration: %w", err)
+	}
+
+	if err := store.Write(func(cs *storage.CredentialStore) error {
+		for _, c := range credentials {
+			var credData *webauthn.Credential
+			if err := json.Unmarshal(c.CredentialData, &credData); err != nil {
+				return fmt.Errorf("unmarshal credential data: %w", err)
+			}
+
+			cs.Credentials = append(cs.Credentials, &storage.Credential{
+				ID:             c.ID,
+				CredentialID:   c.CredentialID,
+				UserID:         c.UserID,
+				Name:           c.Name,
+				CredentialData: credData,
+				CreatedAt:      c.CreatedAt,
+			})
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("write credential store: %w", err)
+	}
 
 	return nil
 }

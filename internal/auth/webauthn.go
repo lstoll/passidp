@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"crawshaw.dev/jsonfile"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
@@ -17,7 +18,7 @@ import (
 	"lds.li/web/httperror"
 	"lds.li/web/session"
 	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
@@ -35,9 +36,9 @@ func SkipAuthn(r *http.Request) *http.Request {
 }
 
 type Authenticator struct {
-	Webauthn *webauthn.WebAuthn
-	Queries  *queries.Queries
-	Config   *config.Config
+	Webauthn  *webauthn.WebAuthn
+	CredStore *jsonfile.JSONFile[storage.CredentialStore]
+	Config    *config.Config
 }
 
 func (a *Authenticator) AddHandlers(r *web.Server) {
@@ -196,14 +197,24 @@ func (a *Authenticator) DoLogin(ctx context.Context, w web.ResponseWriter, r *we
 		return fmt.Errorf("validating login: %w", err)
 	}
 
-	// Update credential data
-	cb, err := json.Marshal(credential)
-	if err != nil {
-		return fmt.Errorf("marshalling credential: %w", err)
-	}
-
-	if err := a.Queries.UpdateCredentialDataByCredentialID(ctx, cb, credential.ID); err != nil {
-		return fmt.Errorf("updating credential: %w", err)
+	if err := a.CredStore.Write(func(cs *storage.CredentialStore) error {
+		// TODO(lstoll) - what data is being updated here, if it's just the
+		// counter we should maybe split that out into the working store, to
+		// stop changing the file.
+		var updated bool
+		for _, cred := range cs.Credentials {
+			if bytes.Equal(cred.CredentialID, credential.ID) {
+				cred.CredentialData = credential
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			return fmt.Errorf("no credential found for %s to update", credential.ID)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("writing credential to store: %w", err)
 	}
 
 	// Set user ID in session

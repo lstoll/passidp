@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"crawshaw.dev/jsonfile"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/oklog/run"
@@ -28,19 +29,26 @@ import (
 	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/oidcsvr"
 	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
 type ServeCmd struct {
-	ListenAddr  string `default:"localhost:8085" env:"IDP_LISTEN_ADDR" help:"Listen address for the server."`
-	MetricsAddr string `env:"IDP_METRICS_ADDR" help:"Expose Prometheus metrics on the given host:port."`
-	CertFile    string `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
-	KeyFile     string `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
+	ListenAddr          string `default:"localhost:8085" env:"IDP_LISTEN_ADDR" help:"Listen address for the server."`
+	MetricsAddr         string `env:"IDP_METRICS_ADDR" help:"Expose Prometheus metrics on the given host:port."`
+	CertFile            string `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
+	KeyFile             string `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
+	CredentialStorePath string `env:"IDP_CREDENTIAL_STORE_PATH" required:"" help:"Path to the credential store file."`
 }
 
 func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) error {
 	var g run.Group
 	g.Add(run.ContextHandler(ctx))
+
+	credStore, err := storage.NewCredentialStore(c.CredentialStorePath)
+	if err != nil {
+		return fmt.Errorf("open credential store from %s: %w", c.CredentialStorePath, err)
+	}
 
 	// Create multi-clients that combines both
 	multiClients := clients.NewMultiClients(&clients.StaticClients{
@@ -48,7 +56,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 		&clients.DynamicClients{DB: queries.New(db)},
 	)
 
-	idph, err := NewIDP(ctx, &g, config, db, config.ParsedIssuer, multiClients)
+	idph, err := NewIDP(ctx, &g, config, credStore, db, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
@@ -117,7 +125,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 }
 
 // NewIDP creates a new IDP server for the given params.
-func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
+func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
 	oidcHandles, err := initKeysets(ctx, sqldb)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
@@ -188,20 +196,19 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, sqldb *sql.DB
 	}
 
 	// start configuration of webauthn manager
-	mgr := adminui.NewWebAuthnManager(cfg, queries.New(sqldb), wn)
+	mgr := adminui.NewWebAuthnManager(cfg, credStore, wn)
 
 	mgr.AddHandlers(websvr)
 
 	auth := &auth.Authenticator{
-		Webauthn: wn,
-		Queries:  queries.New(sqldb),
-		Config:   cfg,
+		Webauthn:  wn,
+		CredStore: credStore,
+		Config:    cfg,
 	}
 	auth.AddHandlers(websvr)
 
 	oidchHandlers := &oidcsvr.Handlers{
 		Issuer:  issuerURL.String(),
-		Queries: queries.New(sqldb),
 		Clients: clients,
 		Config:  cfg,
 	}

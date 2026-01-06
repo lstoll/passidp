@@ -127,6 +127,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if clictx.Selected().Name == "serve" {
+		if err := migrateCredentials(ctx, db, rootCmd.Serve.CredentialStorePath); err != nil {
+			slog.Error("migrate credentials", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	}
+
 	clictx.BindTo(ctx, (*context.Context)(nil))
 	clictx.Bind(db)
 	clictx.Bind(config)

@@ -17,7 +17,7 @@ import (
 	"lds.li/oauth2ext/oidcclientreg"
 	"lds.li/web"
 	"lds.li/webauthn-oidc-idp/internal/auth"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 // DynamicClient represents an retrieved dynamic client for the oidcsvr handler
@@ -43,7 +43,7 @@ func (d *DynamicClient) RequiredGroups() []string {
 }
 
 type DynamicClients struct {
-	DB *queries.Queries
+	DB *storage.DynamicClientStore
 }
 
 func (d *DynamicClients) AddHandlers(r *web.Server) {
@@ -76,6 +76,9 @@ func (d *DynamicClients) GetClientMetadata(ctx context.Context, clientID string)
 	if err != nil {
 		return nil, fmt.Errorf("client %s not found: %w", clientID, err)
 	}
+	if client == nil {
+		return nil, fmt.Errorf("client %s not found", clientID)
+	}
 
 	var registration oidcclientreg.ClientRegistrationRequest
 	if err := json.Unmarshal([]byte(client.RegistrationBlob), &registration); err != nil {
@@ -102,7 +105,7 @@ func (d *DynamicClients) ClientOpts(ctx context.Context, clientID string) ([]oau
 	}
 
 	client, err := d.DB.GetDynamicClient(ctx, clientID)
-	if err != nil {
+	if err != nil || client == nil {
 		return nil, nil
 	}
 
@@ -187,7 +190,7 @@ func (d *DynamicClients) ValidateClientSecret(ctx context.Context, clientID, cli
 	}
 
 	client, err := d.DB.GetDynamicClient(ctx, clientID)
-	if err != nil {
+	if err != nil || client == nil {
 		return false, fmt.Errorf("client %s not found", clientID)
 	}
 
@@ -206,7 +209,7 @@ func (d *DynamicClients) RedirectURIs(ctx context.Context, clientID string) ([]s
 	}
 
 	client, err := d.DB.GetDynamicClient(ctx, clientID)
-	if err != nil {
+	if err != nil || client == nil {
 		return nil, fmt.Errorf("client %s not found", clientID)
 	}
 
@@ -252,14 +255,7 @@ func (d *DynamicClients) registerClient(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Store in database
-	params := queries.CreateDynamicClientParams{
-		ID:               clientID,
-		ClientSecretHash: clientSecretHash,
-		RegistrationBlob: string(metadataJSON),
-		ExpiresAt:        expiresAt,
-	}
-
-	if err := d.DB.CreateDynamicClient(r.Context(), params); err != nil {
+	if err := d.DB.CreateDynamicClient(r.Context(), clientID, clientSecretHash, string(metadataJSON), expiresAt); err != nil {
 		http.Error(w, "failed to create client", http.StatusInternalServerError)
 		return
 	}

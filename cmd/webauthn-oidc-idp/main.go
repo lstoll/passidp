@@ -135,7 +135,6 @@ func main() {
 	}
 
 	clictx.BindTo(ctx, (*context.Context)(nil))
-	clictx.Bind(db)
 	clictx.Bind(config)
 	clictx.FatalIfErrorf(clictx.Run())
 }

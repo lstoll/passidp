@@ -14,7 +14,6 @@ import (
 	"lds.li/web/httperror"
 	"lds.li/webauthn-oidc-idp/internal/auth"
 	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
 func init() {
@@ -34,7 +33,6 @@ type Server struct {
 	Auth      *auth.Authenticator
 	OAuth2AS  *oauth2as.Server
 	Discovery *discovery.OIDCConfigurationHandler
-	DB        *queries.Queries
 	Clients   ClientSource
 	Config    *config.Config
 }

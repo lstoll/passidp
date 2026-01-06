@@ -2,72 +2,53 @@ package clients
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"lds.li/oauth2ext/oidcclientreg"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
-// setupTestDB creates an in-memory SQLite database for testing
-func setupTestDB(t *testing.T) (*queries.Queries, func()) {
-	// Create in-memory SQLite database
-	db, err := sql.Open("sqlite3", ":memory:")
+// setupTestDB creates a temporary BoltDB database for testing
+func setupTestDB(t *testing.T) (*storage.DynamicClientStore, func()) {
+	// Create temporary file for BoltDB
+	tmpfile, err := os.CreateTemp("", "test-dynamic-clients-*.db")
 	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpfile.Close()
+
+	// Create State instance (which initializes buckets)
+	state, err := storage.NewState(tmpfile.Name())
+	if err != nil {
+		os.Remove(tmpfile.Name())
+		t.Fatalf("failed to create state: %v", err)
 	}
 
-	// Create the dynamic_clients table
-	_, err = db.Exec(`
-		CREATE TABLE dynamic_clients (
-			id TEXT PRIMARY KEY,
-			client_secret_hash TEXT NOT NULL,
-			registration_blob TEXT NOT NULL,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			expires_at DATETIME NOT NULL,
-			active BOOLEAN NOT NULL DEFAULT TRUE
-		);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Create indexes
-	_, err = db.Exec(`
-		CREATE INDEX idx_dynamic_clients_active_expires ON dynamic_clients(active, expires_at);
-		CREATE INDEX idx_dynamic_clients_id_active ON dynamic_clients(id, active);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create indexes: %v", err)
-	}
-
-	queriesDB := queries.New(db)
+	store := storage.NewDynamicClientStore(state)
 
 	cleanup := func() {
-		db.Close()
+		state.Close()
+		os.Remove(tmpfile.Name())
 	}
 
-	return queriesDB, cleanup
+	return store, cleanup
 }
 
 // createTestDynamicClient creates a dynamic client in the database for testing
-func createTestDynamicClient(t *testing.T, db *queries.Queries, clientID string, req oidcclientreg.ClientRegistrationRequest) {
+func createTestDynamicClient(t *testing.T, db *storage.DynamicClientStore, clientID string, req oidcclientreg.ClientRegistrationRequest) {
 	reqBody, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("failed to marshal request: %v", err)
 	}
 
-	params := queries.CreateDynamicClientParams{
-		ID:               clientID,
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
+	// Use clientID as part of hash to ensure uniqueness
+	secretHash := fmt.Sprintf("test-hash-%s", clientID)
 
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
+	if err := db.CreateDynamicClient(context.Background(), clientID, secretHash, string(reqBody), time.Now().AddDate(0, 0, 14)); err != nil {
 		t.Fatalf("failed to create test client: %v", err)
 	}
 }

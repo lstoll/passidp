@@ -3,7 +3,6 @@ package e2e_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -27,7 +26,6 @@ import (
 	clitoken "lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/oidc"
 	"lds.li/oauth2ext/provider"
-	dbpkg "lds.li/webauthn-oidc-idp/db"
 	"lds.li/webauthn-oidc-idp/internal/admincli"
 	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/idp"
@@ -114,16 +112,6 @@ func TestE2E(t *testing.T) {
 	serveCtx, serveCancel := context.WithCancel(context.Background())
 	t.Cleanup(serveCancel)
 
-	sqldb, err := sql.Open("sqlite3", "file:test.db?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open in-memory database: %v", err)
-	}
-	defer sqldb.Close()
-
-	if err := dbpkg.Migrate(ctx, sqldb); err != nil {
-		t.Fatalf("run migrations: %v", err)
-	}
-
 	certPath, keyPath := GenerateTestCert(t)
 
 	// Configure http.DefaultClient to trust our test certificate
@@ -152,7 +140,7 @@ func TestE2E(t *testing.T) {
 			CredentialStorePath: credstorePath,
 			StatePath:           statePath,
 		}
-		serveErr <- idpCmd.Run(serveCtx, config, sqldb)
+		serveErr <- idpCmd.Run(serveCtx, config)
 	}()
 
 	select {

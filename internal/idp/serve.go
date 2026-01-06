@@ -2,7 +2,6 @@ package idp
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"log/slog"
@@ -27,7 +26,6 @@ import (
 	"lds.li/webauthn-oidc-idp/internal/clients"
 	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/oidcsvr"
-	"lds.li/webauthn-oidc-idp/internal/queries"
 	"lds.li/webauthn-oidc-idp/internal/storage"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
@@ -41,7 +39,7 @@ type ServeCmd struct {
 	StatePath           string `env:"IDP_STATE_PATH" required:"" help:"Path to the state file."`
 }
 
-func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) error {
+func (c *ServeCmd) Run(ctx context.Context, config *config.Config) error {
 	var g run.Group
 	g.Add(run.ContextHandler(ctx))
 
@@ -58,10 +56,10 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 	// Create multi-clients that combines both
 	multiClients := clients.NewMultiClients(&clients.StaticClients{
 		Clients: config.Clients},
-		&clients.DynamicClients{DB: queries.New(db)},
+		&clients.DynamicClients{DB: storage.NewDynamicClientStore(state)},
 	)
 
-	idph, err := NewIDP(ctx, &g, config, credStore, state, db, config.ParsedIssuer, multiClients)
+	idph, err := NewIDP(ctx, &g, config, credStore, state, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
@@ -130,7 +128,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 }
 
 // NewIDP creates a new IDP server for the given params.
-func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], state *storage.State, sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
+func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], state *storage.State, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
 	oidcHandles, err := initKeysets(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
@@ -249,7 +247,6 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Auth:      auth,
 		OAuth2AS:  oauth2asServer,
 		Discovery: disco,
-		DB:        queries.New(sqldb),
 		Clients:   clients,
 	}
 

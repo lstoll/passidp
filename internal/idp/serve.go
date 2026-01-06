@@ -48,7 +48,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 		&clients.DynamicClients{DB: queries.New(db)},
 	)
 
-	idph, err := NewIDP(ctx, &g, db, config.ParsedIssuer, multiClients)
+	idph, err := NewIDP(ctx, &g, config, db, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
@@ -117,7 +117,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) e
 }
 
 // NewIDP creates a new IDP server for the given params.
-func NewIDP(ctx context.Context, g *run.Group, sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
+func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, sqldb *sql.DB, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
 	oidcHandles, err := initKeysets(ctx, sqldb)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
@@ -188,13 +188,14 @@ func NewIDP(ctx context.Context, g *run.Group, sqldb *sql.DB, issuerURL *url.URL
 	}
 
 	// start configuration of webauthn manager
-	mgr := adminui.NewWebAuthnManager(queries.New(sqldb), wn)
+	mgr := adminui.NewWebAuthnManager(cfg, queries.New(sqldb), wn)
 
 	mgr.AddHandlers(websvr)
 
 	auth := &auth.Authenticator{
 		Webauthn: wn,
 		Queries:  queries.New(sqldb),
+		Config:   cfg,
 	}
 	auth.AddHandlers(websvr)
 
@@ -202,6 +203,7 @@ func NewIDP(ctx context.Context, g *run.Group, sqldb *sql.DB, issuerURL *url.URL
 		Issuer:  issuerURL.String(),
 		Queries: queries.New(sqldb),
 		Clients: clients,
+		Config:  cfg,
 	}
 
 	oauth2asConfig := oauth2as.Config{

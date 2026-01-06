@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tailscale/hujson"
 )
 
@@ -20,6 +21,8 @@ type Config struct {
 	ParsedIssuer *url.URL `json:"-"`
 	// Clients is a list of fixed clients for this issuer.
 	Clients []Client `json:"clients,omitempty"`
+	// Users is a list of users for this issuer.
+	Users Users `json:"users,omitempty"`
 }
 
 // ParseConfig parses the config from the given file, expanding environment
@@ -78,6 +81,24 @@ func (c *Config) Validate() error {
 				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid token validity: %w", cl.ID, err))
 			}
 			c.Clients[ci].ParsedTokenValidity = tokenValidity
+		}
+	}
+
+	for _, u := range c.Users {
+		if u.ID == uuid.Nil {
+			validErr = errors.Join(validErr, fmt.Errorf("user %s missing ID", u.ID))
+		}
+		if u.Email == "" {
+			validErr = errors.Join(validErr, fmt.Errorf("user %s missing email", u.ID))
+		}
+		if u.FullName == "" {
+			validErr = errors.Join(validErr, fmt.Errorf("user %s missing full name", u.ID))
+		}
+		if u.WebauthnHandle == uuid.Nil {
+			validErr = errors.Join(validErr, fmt.Errorf("user %s missing webauthn handle", u.ID))
+		}
+		if u.WebauthnHandle == u.ID {
+			validErr = errors.Join(validErr, fmt.Errorf("user %s webauthn handle must be a different UUID than the user ID", u.ID))
 		}
 	}
 

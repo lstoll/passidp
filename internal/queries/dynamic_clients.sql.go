@@ -11,7 +11,7 @@ import (
 )
 
 const cleanupExpiredDynamicClients = `-- name: CleanupExpiredDynamicClients :exec
-DELETE FROM dynamic_clients 
+DELETE FROM dynamic_clients
 WHERE expires_at <= datetime('now') OR active = FALSE
 `
 
@@ -46,8 +46,8 @@ func (q *Queries) CreateDynamicClient(ctx context.Context, arg CreateDynamicClie
 }
 
 const deactivateDynamicClient = `-- name: DeactivateDynamicClient :exec
-UPDATE dynamic_clients 
-SET active = FALSE 
+UPDATE dynamic_clients
+SET active = FALSE
 WHERE id = ?
 `
 
@@ -57,7 +57,7 @@ func (q *Queries) DeactivateDynamicClient(ctx context.Context, id string) error 
 }
 
 const getDynamicClient = `-- name: GetDynamicClient :one
-SELECT id, client_secret_hash, registration_blob, created_at, expires_at, active FROM dynamic_clients 
+SELECT id, client_secret_hash, registration_blob, created_at, expires_at, active FROM dynamic_clients
 WHERE id = ? AND active = TRUE AND expires_at > datetime('now')
 `
 
@@ -76,7 +76,7 @@ func (q *Queries) GetDynamicClient(ctx context.Context, id string) (DynamicClien
 }
 
 const getDynamicClientBySecretHash = `-- name: GetDynamicClientBySecretHash :one
-SELECT id, client_secret_hash, registration_blob, created_at, expires_at, active FROM dynamic_clients 
+SELECT id, client_secret_hash, registration_blob, created_at, expires_at, active FROM dynamic_clients
 WHERE client_secret_hash = ? AND active = TRUE AND expires_at > datetime('now')
 `
 
@@ -95,7 +95,7 @@ func (q *Queries) GetDynamicClientBySecretHash(ctx context.Context, clientSecret
 }
 
 const listActiveDynamicClients = `-- name: ListActiveDynamicClients :many
-SELECT id, client_secret_hash, registration_blob, created_at, expires_at, active FROM dynamic_clients 
+SELECT id, client_secret_hash, registration_blob, created_at, expires_at, active FROM dynamic_clients
 WHERE active = TRUE AND expires_at > datetime('now')
 ORDER BY created_at DESC
 `

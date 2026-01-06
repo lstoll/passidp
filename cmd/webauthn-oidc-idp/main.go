@@ -54,16 +54,8 @@ var rootCmd = struct {
 
 	Version kong.VersionFlag `help:"Print version information"`
 
-	Serve               idp.ServeCmd                    `cmd:"" help:"Serve the IDP server."`
-	EnrollUser          admincli.EnrollUserCmd          `cmd:"" help:"Enroll a user into the system."`
-	AddCredential       admincli.AddCredentialCmd       `cmd:"" help:"Add a credential to a user."`
-	ListCredentials     admincli.ListCredentialsCmd     `cmd:"" help:"List credentials for a user."`
-	CreateGroup         admincli.CreateGroupCmd         `cmd:"" help:"Create a new group."`
-	ListGroups          admincli.ListGroupsCmd          `cmd:"" help:"List groups."`
-	AddUserToGroup      admincli.AddUserToGroupCmd      `cmd:"" help:"Add a user to a group."`
-	RemoveUserFromGroup admincli.RemoveUserFromGroupCmd `cmd:"" help:"Remove a user from a group."`
-	ListUserGroups      admincli.ListUserGroupsCmd      `cmd:"" help:"List groups for a user."`
-	ListUsers           admincli.ListUsersCmd           `cmd:"" help:"List all users."`
+	Serve         idp.ServeCmd              `cmd:"" help:"Serve the IDP server."`
+	AddCredential admincli.AddCredentialCmd `cmd:"" help:"Add a credential to a user."`
 }{}
 
 func main() {
@@ -127,6 +119,12 @@ func main() {
 			slog.Error("run migrations", slog.String("error", err.Error()))
 			os.Exit(1)
 		}
+	}
+
+	// run any data migrations
+	if err := migrateUserData(ctx, db, config); err != nil {
+		slog.Error("migrate user data", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	clictx.BindTo(ctx, (*context.Context)(nil))

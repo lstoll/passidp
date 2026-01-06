@@ -2,14 +2,12 @@ package admincli
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/google/uuid"
 	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
 type AddCredentialCmd struct {
@@ -18,7 +16,7 @@ type AddCredentialCmd struct {
 	Output io.Writer `kong:"-"`
 }
 
-func (c *AddCredentialCmd) Run(ctx context.Context, db *sql.DB, config *config.Config) error {
+func (c *AddCredentialCmd) Run(ctx context.Context, cfg *config.Config) error {
 	if c.Output == nil {
 		c.Output = os.Stdout
 	}
@@ -28,19 +26,15 @@ func (c *AddCredentialCmd) Run(ctx context.Context, db *sql.DB, config *config.C
 		return fmt.Errorf("parse user-id: %w", err)
 	}
 
-	q := queries.New(db)
-
-	_, err = q.GetUser(ctx, userUUID)
+	user, err := cfg.Users.GetUser(userUUID)
 	if err != nil {
-		return fmt.Errorf("get user %s: %w", c.UserID, err)
+		return fmt.Errorf("get user: %w", err)
 	}
 
-	ek := uuid.NewString()
+	// this is temporary, will only exist in memory.
 
-	if err := q.SetUserEnrollmentKey(ctx, sql.NullString{String: ek, Valid: true}, userUUID); err != nil {
-		return fmt.Errorf("set user enrollment key: %w", err)
-	}
+	user.EnrollmentKey = uuid.NewString()
 
-	fmt.Fprintf(c.Output, "Enroll at: %s\n", fmt.Sprintf("%s/registration?enrollment_token=%s&user_id=%s", config.Issuer, ek, userUUID.String()))
+	fmt.Fprintf(c.Output, "Enroll at: %s\n", fmt.Sprintf("%s/registration?enrollment_token=%s&user_id=%s", cfg.Issuer, user.EnrollmentKey, userUUID.String()))
 	return nil
 }

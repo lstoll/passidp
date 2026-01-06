@@ -16,6 +16,7 @@ import (
 	"lds.li/web"
 	"lds.li/web/httperror"
 	"lds.li/web/session"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
@@ -36,6 +37,7 @@ func SkipAuthn(r *http.Request) *http.Request {
 type Authenticator struct {
 	Webauthn *webauthn.WebAuthn
 	Queries  *queries.Queries
+	Config   *config.Config
 }
 
 func (a *Authenticator) AddHandlers(r *web.Server) {

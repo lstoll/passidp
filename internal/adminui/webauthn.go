@@ -14,6 +14,7 @@ import (
 	"lds.li/web"
 	"lds.li/web/session"
 	"lds.li/webauthn-oidc-idp/internal/auth"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
@@ -39,12 +40,14 @@ type registerData struct {
 }
 
 type WebAuthnManager struct {
+	config   *config.Config
 	queries  *queries.Queries
 	webauthn *webauthn.WebAuthn
 }
 
-func NewWebAuthnManager(queries *queries.Queries, webauthn *webauthn.WebAuthn) *WebAuthnManager {
+func NewWebAuthnManager(config *config.Config, queries *queries.Queries, webauthn *webauthn.WebAuthn) *WebAuthnManager {
 	return &WebAuthnManager{
+		config:   config,
 		queries:  queries,
 		webauthn: webauthn,
 	}
@@ -67,11 +70,12 @@ func (w *WebAuthnManager) registration(ctx context.Context, rw web.ResponseWrite
 	et := req.URL().Query().Get("enrollment_token")
 	if uid != "" && et != "" {
 		// we want to enroll a user. Find them, and match the token
-		user, err := w.queries.GetUser(ctx, uuid.MustParse(uid))
+		var user *config.User
+		user, err := w.config.Users.GetUserByStringID(uid)
 		if err != nil {
 			return fmt.Errorf("get user %s: %w", uid, err)
 		}
-		if !user.EnrollmentKey.Valid || user.EnrollmentKey.String == "" || subtle.ConstantTimeCompare([]byte(et), []byte(user.EnrollmentKey.String)) == 0 {
+		if user.EnrollmentKey == "" || subtle.ConstantTimeCompare([]byte(et), []byte(user.EnrollmentKey)) == 0 {
 			return fmt.Errorf("either previous enrollment completed fine, or invalid enrollment")
 		}
 		sess := session.MustFromContext(ctx)
@@ -106,7 +110,7 @@ func (w *WebAuthnManager) beginRegistration(ctx context.Context, rw web.Response
 		return fmt.Errorf("no enroll to user id set in session")
 	}
 
-	user, err := w.queries.GetUser(ctx, uuid.MustParse(pwe.ForUserID))
+	user, err := w.config.Users.GetUserByStringID(pwe.ForUserID)
 	if err != nil {
 		return fmt.Errorf("get user %s: %w", pwe.ForUserID, err)
 	}
@@ -145,7 +149,7 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 		return fmt.Errorf("no enroll to user id set in session")
 	}
 
-	user, err := w.queries.GetUser(ctx, uuid.MustParse(pwe.ForUserID))
+	user, err := w.config.Users.GetUserByStringID(pwe.ForUserID)
 	if err != nil {
 		return fmt.Errorf("getting user %s: %w", pwe.ForUserID, err)
 	}

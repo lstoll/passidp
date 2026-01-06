@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"crawshaw.dev/jsonfile"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
@@ -15,7 +16,7 @@ import (
 	"lds.li/web/session"
 	"lds.li/webauthn-oidc-idp/internal/auth"
 	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
@@ -40,16 +41,16 @@ type registerData struct {
 }
 
 type WebAuthnManager struct {
-	config   *config.Config
-	queries  *queries.Queries
-	webauthn *webauthn.WebAuthn
+	config    *config.Config
+	credStore *jsonfile.JSONFile[storage.CredentialStore]
+	webauthn  *webauthn.WebAuthn
 }
 
-func NewWebAuthnManager(config *config.Config, queries *queries.Queries, webauthn *webauthn.WebAuthn) *WebAuthnManager {
+func NewWebAuthnManager(config *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], webauthn *webauthn.WebAuthn) *WebAuthnManager {
 	return &WebAuthnManager{
-		config:   config,
-		queries:  queries,
-		webauthn: webauthn,
+		config:    config,
+		credStore: credStore,
+		webauthn:  webauthn,
 	}
 }
 
@@ -180,17 +181,15 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 		return fmt.Errorf("creating credential: %w", err)
 	}
 
-	cb, err := json.Marshal(credential)
-	if err != nil {
-		return fmt.Errorf("marshalling credential: %w", err)
-	}
-
-	if err := w.queries.CreateUserCredential(ctx, queries.CreateUserCredentialParams{
-		ID:             uuid.New(),
-		CredentialID:   credential.ID,
-		CredentialData: cb,
-		Name:           keyName,
-		UserID:         user.ID,
+	if err := w.credStore.Write(func(cs *storage.CredentialStore) error {
+		cs.Credentials = append(cs.Credentials, &storage.Credential{
+			ID:             uuid.New(),
+			CredentialID:   credential.ID,
+			CredentialData: credential,
+			Name:           keyName,
+			UserID:         user.ID,
+		})
+		return nil
 	}); err != nil {
 		return fmt.Errorf("creating user credential: %w", err)
 	}

@@ -7,44 +7,21 @@ package queries
 
 import (
 	"context"
-	"time"
-
-	"github.com/google/uuid"
 )
 
-const createUserCredential = `-- name: CreateUserCredential :exec
-INSERT INTO credentials (id, user_id, name, credential_id, credential_data, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+const getCredentialsForMigration = `-- name: GetCredentialsForMigration :many
+
+
+SELECT id, credential_id, user_id, name, credential_data, created_at FROM credentials
 `
 
-type CreateUserCredentialParams struct {
-	ID             uuid.UUID
-	UserID         uuid.UUID
-	Name           string
-	CredentialID   []byte
-	CredentialData []byte
-	CreatedAt      time.Time
-}
-
-func (q *Queries) CreateUserCredential(ctx context.Context, arg CreateUserCredentialParams) error {
-	_, err := q.db.ExecContext(ctx, createUserCredential,
-		arg.ID,
-		arg.UserID,
-		arg.Name,
-		arg.CredentialID,
-		arg.CredentialData,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const getUserCredentials = `-- name: GetUserCredentials :many
-SELECT id, credential_id, user_id, name, credential_data, created_at FROM credentials c
-WHERE user_id = ?
-`
-
-func (q *Queries) GetUserCredentials(ctx context.Context, userID uuid.UUID) ([]Credential, error) {
-	rows, err := q.db.QueryContext(ctx, getUserCredentials, userID)
+// -- name: GetUserCredentials :many
+// SELECT * FROM credentials c
+// WHERE user_id = ?;
+// -- name: UpdateCredentialDataByCredentialID :exec
+// UPDATE credentials SET credential_data = ? WHERE credential_id = ?;
+func (q *Queries) GetCredentialsForMigration(ctx context.Context) ([]Credential, error) {
+	rows, err := q.db.QueryContext(ctx, getCredentialsForMigration)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +51,13 @@ func (q *Queries) GetUserCredentials(ctx context.Context, userID uuid.UUID) ([]C
 }
 
 const getUsersForMigration = `-- name: GetUsersForMigration :many
+
 SELECT id, email, full_name, enrollment_key, override_subject, webauthn_handle FROM users
 `
 
+// -- name: CreateUserCredential :exec
+// INSERT INTO credentials (id, user_id, name, credential_id, credential_data, created_at)
+// VALUES (?, ?, ?, ?, ?, ?);
 func (q *Queries) GetUsersForMigration(ctx context.Context) ([]User, error) {
 	rows, err := q.db.QueryContext(ctx, getUsersForMigration)
 	if err != nil {
@@ -105,13 +86,4 @@ func (q *Queries) GetUsersForMigration(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
-}
-
-const updateCredentialDataByCredentialID = `-- name: UpdateCredentialDataByCredentialID :exec
-UPDATE credentials SET credential_data = ? WHERE credential_id = ?
-`
-
-func (q *Queries) UpdateCredentialDataByCredentialID(ctx context.Context, credentialData []byte, credentialID []byte) error {
-	_, err := q.db.ExecContext(ctx, updateCredentialDataByCredentialID, credentialData, credentialID)
-	return err
 }

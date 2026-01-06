@@ -2,12 +2,12 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 	"lds.li/webauthn-oidc-idp/internal/config"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 type WebAuthnUser struct {
@@ -93,21 +93,23 @@ func (a *Authenticator) NewDiscoverableUserHandler(ctx context.Context) webauthn
 		}
 
 		// Get user credentials
-		creds, err := a.Queries.GetUserCredentials(ctx, cfgUser.ID)
-		if err != nil {
-			return nil, fmt.Errorf("getting user credentials: %w", err)
-		}
+		var userCreds []storage.Credential
+		a.CredStore.Read(func(cs *storage.CredentialStore) {
+			for _, cred := range cs.Credentials {
+				if cred.UserID == cfgUser.ID {
+					userCreds = append(userCreds, *cred)
+				}
+			}
+		})
 
 		wu := &WebAuthnUser{
 			user:       cfgUser,
 			overrideID: validateID,
 		}
-		for _, c := range creds {
-			var cred webauthn.Credential
-			if err := json.Unmarshal(c.CredentialData, &cred); err != nil {
-				return nil, fmt.Errorf("unmarshalling credential: %w", err)
+		for _, c := range userCreds {
+			if c.UserID == cfgUser.ID {
+				wu.credentials = append(wu.credentials, *c.CredentialData)
 			}
-			wu.credentials = append(wu.credentials, cred)
 		}
 
 		return wu, nil

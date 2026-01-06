@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -9,7 +8,6 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/descope/virtualwebauthn"
 	_ "github.com/mattn/go-sqlite3"
@@ -25,7 +23,7 @@ import (
 	"lds.li/web/webtest"
 	dbpkg "lds.li/webauthn-oidc-idp/db"
 	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
@@ -51,10 +49,15 @@ func TestWebauthnAuth(t *testing.T) {
 		t.Fatalf("create webauthn: %v", err)
 	}
 
+	credStore, err := storage.NewCredentialStore(t.TempDir() + "/credential-store.json")
+	if err != nil {
+		t.Fatalf("create credential store: %v", err)
+	}
+
 	auth := &Authenticator{
-		Webauthn: wn,
-		Queries:  queries.New(sqldb),
-		Config:   &config.Config{},
+		Webauthn:  wn,
+		CredStore: credStore,
+		Config:    &config.Config{},
 	}
 
 	t.Run("login", func(t *testing.T) {
@@ -256,22 +259,17 @@ func createUserWithCredential(t *testing.T, auth *Authenticator) (virtualwebauth
 		t.Fatalf("create credential: %v", err)
 	}
 
-	// Store credential in database
-	credentialData, err := json.Marshal(createdCredential)
-	if err != nil {
-		t.Fatalf("marshal credential: %v", err)
-	}
-
-	err = auth.Queries.CreateUserCredential(context.Background(), queries.CreateUserCredentialParams{
-		ID:             uuid.New(),
-		UserID:         userID,
-		Name:           "Test Credential",
-		CredentialID:   createdCredential.ID,
-		CredentialData: credentialData,
-		CreatedAt:      time.Now(),
-	})
-	if err != nil {
-		t.Fatalf("create credential: %v", err)
+	if err := auth.CredStore.Write(func(cs *storage.CredentialStore) error {
+		cs.Credentials = append(cs.Credentials, &storage.Credential{
+			ID:             uuid.New(),
+			CredentialID:   createdCredential.ID,
+			CredentialData: createdCredential,
+			Name:           "Test Credential",
+			UserID:         userID,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("write credential to store: %v", err)
 	}
 
 	return authenticator, credential, webauthnHandle

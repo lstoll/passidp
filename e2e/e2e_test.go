@@ -31,7 +31,7 @@ import (
 	"lds.li/webauthn-oidc-idp/internal/admincli"
 	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/idp"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 // browserStepTimeout returns a duration to timeout browser operations. It defaults
@@ -92,6 +92,8 @@ func TestE2E(t *testing.T) {
 	})
 
 	/* start an instance of the server */
+	credstorePath := t.TempDir() + "/credential-store.json"
+
 	port := mustAllocatePort()
 
 	os.Setenv("ISSUER_URL", "https://localhost:"+port)
@@ -143,9 +145,10 @@ func TestE2E(t *testing.T) {
 		})
 
 		idpCmd := &idp.ServeCmd{
-			ListenAddr: net.JoinHostPort("localhost", port),
-			CertFile:   certPath,
-			KeyFile:    keyPath,
+			ListenAddr:          net.JoinHostPort("localhost", port),
+			CertFile:            certPath,
+			KeyFile:             keyPath,
+			CredentialStorePath: credstorePath,
 		}
 		serveErr <- idpCmd.Run(serveCtx, config, sqldb)
 	}()
@@ -257,13 +260,16 @@ func TestE2E(t *testing.T) {
 		case <-doneC:
 		}
 
-		creds, err := queries.New(sqldb).GetUserCredentials(ctx, config.Users[0].ID)
+		credStore, err := storage.OpenCredentialStore(credstorePath)
 		if err != nil {
-			t.Fatalf("getting user credentials: %v", err)
+			t.Fatalf("open credential store: %v", err)
 		}
-		if len(creds) == 0 {
-			t.Fatalf("expected user to have at least 1 credential, got: %d", len(creds))
-		}
+
+		credStore.Read(func(cs *storage.CredentialStore) {
+			if len(cs.Credentials) == 0 {
+				t.Fatalf("expected at least 1 credential, got: %d", len(cs.Credentials))
+			}
+		})
 	})
 	if !testOk {
 		t.Fatal("dependent step failed, aborting")

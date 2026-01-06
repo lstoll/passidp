@@ -1,0 +1,21 @@
+{
+	"issuer": "https://localhost:5555",
+	"users": [
+        {
+            "id": "da5b51ac-0efd-4631-8790-9f02d516527c",
+            "email": "dev-user@example.com",
+            "fullName": "Dev User",
+            "groups": ["dev-group"],
+            "webauthnHandle": "8d1131af-c661-4706-a6dc-bfcf31989f4e"
+        }
+    ],
+	"clients": [
+		{
+			"id": "cli",
+			"public": true,
+			"redirectURLs": [
+				"http://127.0.0.1/callback",
+			],
+		}
+	]
+}

@@ -2,19 +2,15 @@ package clients
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
-	"time"
 
-	_ "github.com/mattn/go-sqlite3"
-	"lds.li/oauth2ext/oidcclientreg"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/config"
 )
 
 func TestMultiClients_GetClient(t *testing.T) {
 	// Test static client takes precedence
 	staticClients := &StaticClients{
-		Clients: []Client{
+		Clients: []config.Client{
 			{
 				ID:           "static-client",
 				RedirectURLs: []string{"https://example.com/callback"},
@@ -30,28 +26,9 @@ func TestMultiClients_GetClient(t *testing.T) {
 	dynamicClients := &DynamicClients{DB: db}
 
 	// Create a dynamic client with the same ID
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://dynamic.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	params := queries.CreateDynamicClientParams{
-		ID:               "static-client", // Same ID as static client
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create dynamic client: %v", err)
-	}
+	req := defaultTestClientRequest()
+	req.RedirectURIs = []string{"https://dynamic.com/callback"}
+	createTestDynamicClient(t, db, "static-client", req) // Same ID as static client
 
 	multi := NewMultiClients(staticClients, dynamicClients)
 
@@ -60,11 +37,11 @@ func TestMultiClients_GetClient(t *testing.T) {
 	if !found {
 		t.Error("expected to find client")
 	}
-	if client.ID != "static-client" {
-		t.Errorf("expected static client, got %s", client.ID)
+	if client.(*StaticClient).configClient.ID != "static-client" {
+		t.Errorf("expected static client, got %s", client.(*StaticClient).configClient.ID)
 	}
-	if len(client.RedirectURLs) != 1 || client.RedirectURLs[0] != "https://example.com/callback" {
-		t.Errorf("expected static client redirect URLs, got %v", client.RedirectURLs)
+	if len(client.(*StaticClient).configClient.RedirectURLs) != 1 || client.(*StaticClient).configClient.RedirectURLs[0] != "https://example.com/callback" {
+		t.Errorf("expected static client redirect URLs, got %v", client.(*StaticClient).configClient.RedirectURLs)
 	}
 
 	// Test dynamic client when static doesn't exist
@@ -82,7 +59,7 @@ func TestMultiClients_GetClient(t *testing.T) {
 
 func TestMultiClients_IsValidClientID(t *testing.T) {
 	staticClients := &StaticClients{
-		Clients: []Client{
+		Clients: []config.Client{
 			{ID: "static-client"},
 		},
 	}
@@ -93,28 +70,8 @@ func TestMultiClients_IsValidClientID(t *testing.T) {
 	dynamicClients := &DynamicClients{DB: db}
 
 	// Create a dynamic client
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	params := queries.CreateDynamicClientParams{
-		ID:               "dc.dynamic-client",
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create dynamic client: %v", err)
-	}
+	req := defaultTestClientRequest()
+	createTestDynamicClient(t, db, "dc.dynamic-client", req)
 
 	multi := NewMultiClients(staticClients, dynamicClients)
 
@@ -148,7 +105,7 @@ func TestMultiClients_IsValidClientID(t *testing.T) {
 
 func TestMultiClients_ValidateClientSecret(t *testing.T) {
 	staticClients := &StaticClients{
-		Clients: []Client{
+		Clients: []config.Client{
 			{
 				ID:           "static-client",
 				RedirectURLs: []string{"https://example.com/callback"},
@@ -164,28 +121,8 @@ func TestMultiClients_ValidateClientSecret(t *testing.T) {
 	dynamicClients := &DynamicClients{DB: db}
 
 	// Create a dynamic client
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	params := queries.CreateDynamicClientParams{
-		ID:               "dc.dynamic-client",
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create dynamic client: %v", err)
-	}
+	req := defaultTestClientRequest()
+	createTestDynamicClient(t, db, "dc.dynamic-client", req)
 
 	multi := NewMultiClients(staticClients, dynamicClients)
 
@@ -220,7 +157,7 @@ func TestMultiClients_ValidateClientSecret(t *testing.T) {
 
 func TestMultiClients_RedirectURIs(t *testing.T) {
 	staticClients := &StaticClients{
-		Clients: []Client{
+		Clients: []config.Client{
 			{
 				ID:           "static-client",
 				RedirectURLs: []string{"https://static.com/callback"},
@@ -236,28 +173,9 @@ func TestMultiClients_RedirectURIs(t *testing.T) {
 	dynamicClients := &DynamicClients{DB: db}
 
 	// Create a dynamic client
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://dynamic.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	params := queries.CreateDynamicClientParams{
-		ID:               "dc.dynamic-client",
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create dynamic client: %v", err)
-	}
+	req := defaultTestClientRequest()
+	req.RedirectURIs = []string{"https://dynamic.com/callback"}
+	createTestDynamicClient(t, db, "dc.dynamic-client", req)
 
 	multi := NewMultiClients(staticClients, dynamicClients)
 
@@ -288,7 +206,7 @@ func TestMultiClients_RedirectURIs(t *testing.T) {
 
 func TestMultiClients_ClientOpts(t *testing.T) {
 	staticClients := &StaticClients{
-		Clients: []Client{
+		Clients: []config.Client{
 			{
 				ID:           "static-client",
 				RedirectURLs: []string{"https://example.com/callback"},
@@ -305,28 +223,8 @@ func TestMultiClients_ClientOpts(t *testing.T) {
 	dynamicClients := &DynamicClients{DB: db}
 
 	// Create a dynamic client
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	params := queries.CreateDynamicClientParams{
-		ID:               "dc.dynamic-client",
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create dynamic client: %v", err)
-	}
+	req := defaultTestClientRequest()
+	createTestDynamicClient(t, db, "dc.dynamic-client", req)
 
 	multi := NewMultiClients(staticClients, dynamicClients)
 

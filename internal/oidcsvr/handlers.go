@@ -11,13 +11,27 @@ import (
 	"github.com/google/uuid"
 	"github.com/tink-crypto/tink-go/v2/jwt"
 	"lds.li/oauth2ext/oauth2as"
-	"lds.li/webauthn-oidc-idp/internal/clients"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 )
 
+// Client represents the client information that is used for our custom token
+// handlers.
+type Client interface {
+	// UseOverrideSubject indicates that this client should use the override
+	// subject for tokens/userinfo, if the user has one set.
+	UseOverrideSubject() bool
+	// AccessIDTokenValidity returns the validity time for access/ID tokens. If
+	// 0, the default validity time will be used.
+	AccessIDTokenValidity() time.Duration
+	// RequiredGroups returns the list of group names that the user must be a
+	// member of to access this client. If empty, no group membership is
+	// required.
+	RequiredGroups() []string
+}
+
 // ClientSource defines the interface for retrieving client information
 type ClientSource interface {
-	GetClient(clientID string) (*clients.Client, bool)
+	GetClient(clientID string) (Client, bool)
 }
 
 type Handlers struct {
@@ -66,7 +80,7 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		},
 	}
 
-	if cl.UseOverrideSubject && user.OverrideSubject.Valid {
+	if cl.UseOverrideSubject() && user.OverrideSubject.Valid {
 		idc.Subject = &user.OverrideSubject.String
 	}
 
@@ -74,9 +88,9 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		IDClaims: &idc,
 	}
 
-	if cl.ParsedTokenValidity > 0 {
-		resp.AccessTokenExpiry = time.Now().Add(cl.ParsedTokenValidity)
-		resp.IDTokenExpiry = time.Now().Add(cl.ParsedTokenValidity)
+	if cl.AccessIDTokenValidity() > 0 {
+		resp.AccessTokenExpiry = time.Now().Add(cl.AccessIDTokenValidity())
+		resp.IDTokenExpiry = time.Now().Add(cl.AccessIDTokenValidity())
 	}
 
 	return resp, nil

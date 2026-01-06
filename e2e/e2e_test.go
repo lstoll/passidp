@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	goruntime "runtime"
 	"strconv"
@@ -20,7 +18,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 
-	"github.com/alecthomas/kong"
 	"github.com/chromedp/cdproto/runtime"
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
@@ -33,7 +30,7 @@ import (
 	"lds.li/oauth2ext/provider"
 	dbpkg "lds.li/webauthn-oidc-idp/db"
 	"lds.li/webauthn-oidc-idp/internal/admincli"
-	"lds.li/webauthn-oidc-idp/internal/clients"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/idp"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 )
@@ -98,24 +95,18 @@ func TestE2E(t *testing.T) {
 	/* start an instance of the server */
 	port := mustAllocatePort()
 
-	issU, err := url.Parse("https://localhost:" + port)
-	if err != nil {
-		t.Fatal(err)
-	}
+	os.Setenv("ISSUER_URL", "https://localhost:"+port)
+	t.Cleanup(func() {
+		os.Unsetenv("ISSUER_URL")
+	})
 
-	clients := &clients.StaticClients{
-		Clients: []clients.Client{
-			{
-				ID:           "test-cli",
-				Secrets:      []string{"public"},
-				Public:       true,
-				RedirectURLs: []string{"http://127.0.0.1/callback"},
-			},
-		},
-	}
-	clientsb, err := json.Marshal(clients)
+	cfgb, err := os.ReadFile("testdata/config.hujson")
 	if err != nil {
-		t.Fatalf("marshaling clients: %v", err)
+		t.Fatalf("read config: %v", err)
+	}
+	config, err := config.ParseConfig(cfgb)
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
 	}
 
 	serveCtx, serveCancel := context.WithCancel(context.Background())
@@ -156,12 +147,8 @@ func TestE2E(t *testing.T) {
 			ListenAddr: net.JoinHostPort("localhost", port),
 			CertFile:   certPath,
 			KeyFile:    keyPath,
-			StaticClientsFile: kong.NamedFileContentFlag{
-				Filename: "/a/b/c/clients.json",
-				Contents: clientsb,
-			},
 		}
-		serveErr <- idpCmd.Run(serveCtx, sqldb, issU)
+		serveErr <- idpCmd.Run(serveCtx, config, sqldb)
 	}()
 
 	select {
@@ -173,7 +160,7 @@ func TestE2E(t *testing.T) {
 		t.Fatal("server startup timed out")
 	}
 
-	provider, err := provider.DiscoverOIDCProvider(ctx, issU.String())
+	provider, err := provider.DiscoverOIDCProvider(ctx, config.Issuer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +216,7 @@ func TestE2E(t *testing.T) {
 			FullName: "Test User",
 			Output:   &enrollBuf,
 		}
-		if err := enrollCmd.Run(ctx, sqldb, issU); err != nil {
+		if err := enrollCmd.Run(ctx, sqldb, config); err != nil {
 			t.Fatalf("enrolling user: %v", err)
 		}
 
@@ -446,7 +433,7 @@ func TestE2E(t *testing.T) {
 
 		// and log out, so there's no session cache
 		if err := chromedp.Run(ctx,
-			chromedp.Navigate(issU.String()+"/logout"),
+			chromedp.Navigate(config.Issuer+"/logout"),
 		); err != nil {
 			t.Fatal(err)
 		}

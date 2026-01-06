@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/alecthomas/kong"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/oklog/run"
@@ -26,44 +25,39 @@ import (
 	"lds.li/webauthn-oidc-idp/internal/adminui"
 	"lds.li/webauthn-oidc-idp/internal/auth"
 	"lds.li/webauthn-oidc-idp/internal/clients"
+	"lds.li/webauthn-oidc-idp/internal/config"
 	"lds.li/webauthn-oidc-idp/internal/oidcsvr"
 	"lds.li/webauthn-oidc-idp/internal/queries"
 	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
 type ServeCmd struct {
-	ListenAddr        string                    `default:"localhost:8085" env:"IDP_LISTEN_ADDR" help:"Listen address for the server."`
-	MetricsAddr       string                    `env:"IDP_METRICS_ADDR" help:"Expose Prometheus metrics on the given host:port."`
-	CertFile          string                    `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
-	KeyFile           string                    `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
-	StaticClientsFile kong.NamedFileContentFlag `required:"" env:"IDP_STATIC_CLIENTS_FILE" help:"Path to the static clients file."`
+	ListenAddr  string `default:"localhost:8085" env:"IDP_LISTEN_ADDR" help:"Listen address for the server."`
+	MetricsAddr string `env:"IDP_METRICS_ADDR" help:"Expose Prometheus metrics on the given host:port."`
+	CertFile    string `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
+	KeyFile     string `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
 }
 
-func (c *ServeCmd) Run(ctx context.Context, db *sql.DB, issuerURL *url.URL) error {
+func (c *ServeCmd) Run(ctx context.Context, config *config.Config, db *sql.DB) error {
 	var g run.Group
 	g.Add(run.ContextHandler(ctx))
 
-	staticClients, err := clients.ParseStaticClients(c.StaticClientsFile.Contents)
-	if err != nil {
-		return fmt.Errorf("loading clients: %v", err)
-	}
-
-	// Create dynamic clients
-	dynamicClients := &clients.DynamicClients{DB: queries.New(db)}
-
 	// Create multi-clients that combines both
-	multiClients := clients.NewMultiClients(staticClients, dynamicClients)
+	multiClients := clients.NewMultiClients(&clients.StaticClients{
+		Clients: config.Clients},
+		&clients.DynamicClients{DB: queries.New(db)},
+	)
 
-	idph, err := NewIDP(ctx, &g, db, issuerURL, multiClients)
+	idph, err := NewIDP(ctx, &g, db, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
 
 	mux := http.NewServeMux()
 
-	log.Printf("mountng at hostname %s", issuerURL.Hostname())
+	log.Printf("mountng at hostname %s", config.ParsedIssuer.Hostname())
 
-	mux.Handle(issuerURL.Hostname()+"/", idph)
+	mux.Handle(config.ParsedIssuer.Hostname()+"/", idph)
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Hello, World! %s, host: %s", r.URL.Path, r.URL.Hostname())
 	}))

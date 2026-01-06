@@ -1,23 +1,19 @@
 package clients
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
-	"time"
 
-	_ "github.com/mattn/go-sqlite3"
-	"lds.li/oauth2ext/oidcclientreg"
-	"lds.li/webauthn-oidc-idp/internal/queries"
+	"lds.li/webauthn-oidc-idp/internal/config"
 )
 
 func TestMultiClientsIntegration(t *testing.T) {
-	// This test demonstrates how MultiClients integrates both static and dynamic clients
-	// and shows the precedence behavior
+	// This integration test focuses on scenarios that demonstrate how MultiClients
+	// integrates both static and dynamic clients, particularly edge cases like
+	// precedence and conflicts. Individual method behaviors are tested in unit tests.
 
 	// Create static clients
 	staticClients := &StaticClients{
-		Clients: []Client{
+		Clients: []config.Client{
 			{
 				ID:           "static-web-client",
 				RedirectURLs: []string{"https://static.example.com/callback"},
@@ -41,137 +37,45 @@ func TestMultiClientsIntegration(t *testing.T) {
 	dynamicClients := &DynamicClients{DB: db}
 
 	// Create a dynamic client
-	req := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://dynamic.example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("failed to marshal request: %v", err)
-	}
-
-	params := queries.CreateDynamicClientParams{
-		ID:               "dc.dynamic-web-client",
-		ClientSecretHash: "test-hash",
-		RegistrationBlob: string(reqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), params); err != nil {
-		t.Fatalf("failed to create dynamic client: %v", err)
-	}
+	req := defaultTestClientRequest()
+	req.RedirectURIs = []string{"https://dynamic.example.com/callback"}
+	createTestDynamicClient(t, db, "dc.dynamic-web-client", req)
 
 	// Create MultiClients
 	multi := NewMultiClients(staticClients, dynamicClients)
 
-	// Test 1: Static client takes precedence over dynamic client with same ID
-	// (This would be a real-world scenario where someone tries to register a client
-	// with an ID that conflicts with a static client)
+	// Test: Static client takes precedence when a dynamic client with the same ID exists
+	// This is an important integration scenario showing precedence behavior
+	conflictReq := defaultTestClientRequest()
+	conflictReq.RedirectURIs = []string{"https://conflict.example.com/callback"}
+	createTestDynamicClient(t, db, "static-web-client", conflictReq) // Same ID as static client
 
-	// First, create a dynamic client with the same ID as a static client
-	conflictReq := oidcclientreg.ClientRegistrationRequest{
-		RedirectURIs:    []string{"https://conflict.example.com/callback"},
-		GrantTypes:      []string{"authorization_code"},
-		ResponseTypes:   []string{"code"},
-		ApplicationType: "web",
-	}
-
-	conflictReqBody, err := json.Marshal(conflictReq)
-	if err != nil {
-		t.Fatalf("failed to marshal conflict request: %v", err)
-	}
-
-	conflictParams := queries.CreateDynamicClientParams{
-		ID:               "static-web-client", // Same ID as static client
-		ClientSecretHash: "conflict-hash",
-		RegistrationBlob: string(conflictReqBody),
-		ExpiresAt:        time.Now().AddDate(0, 0, 14),
-	}
-
-	if err := db.CreateDynamicClient(context.Background(), conflictParams); err != nil {
-		t.Fatalf("failed to create conflict dynamic client: %v", err)
-	}
-
-	// Now test that static client takes precedence
 	client, found := multi.GetClient("static-web-client")
 	if !found {
 		t.Fatal("expected to find static client")
 	}
-	if client.ID != "static-web-client" {
-		t.Errorf("expected static client, got %s", client.ID)
+	if _, ok := client.(*StaticClient); !ok {
+		t.Fatal("expected static client to take precedence over dynamic client")
 	}
-	if len(client.RedirectURLs) != 1 || client.RedirectURLs[0] != "https://static.example.com/callback" {
-		t.Errorf("expected static client redirect URLs, got %v", client.RedirectURLs)
+	if client.(*StaticClient).configClient.RedirectURLs[0] != "https://static.example.com/callback" {
+		t.Error("expected static client redirect URI, not dynamic client URI")
 	}
 
-	// Test 2: Dynamic client works when static client doesn't exist
+	// Test: Both client types work together
 	client, found = multi.GetClient("dc.dynamic-web-client")
 	if !found {
 		t.Fatal("expected to find dynamic client")
 	}
-	if client.ID != "dc.dynamic-web-client" {
-		t.Errorf("expected dynamic client, got %s", client.ID)
+	if _, ok := client.(*DynamicClient); !ok {
+		t.Fatal("expected dynamic client")
 	}
 
-	// Test 3: Client validation works for both types
-	valid, err := multi.IsValidClientID(context.Background(), "static-web-client")
-	if err != nil || !valid {
-		t.Error("expected static client to be valid")
-	}
-
-	valid, err = multi.IsValidClientID(context.Background(), "dc.dynamic-web-client")
-	if err != nil || !valid {
-		t.Error("expected dynamic client to be valid")
-	}
-
-	// Test 4: Client secret validation works for both types
-	valid, err = multi.ValidateClientSecret(context.Background(), "static-web-client", "static-secret")
-	if err != nil || !valid {
-		t.Error("expected static client secret to be valid")
-	}
-
-	// Test 5: Redirect URIs work for both types
-	uris, err := multi.RedirectURIs(context.Background(), "static-web-client")
-	if err != nil || len(uris) != 1 || uris[0] != "https://static.example.com/callback" {
-		t.Errorf("expected static client redirect URIs, got %v, err: %v", uris, err)
-	}
-
-	uris, err = multi.RedirectURIs(context.Background(), "dc.dynamic-web-client")
-	if err != nil || len(uris) != 1 || uris[0] != "https://dynamic.example.com/callback" {
-		t.Errorf("expected dynamic client redirect URIs, got %v, err: %v", uris, err)
-	}
-
-	// Test 6: Client options work for both types
-	opts, err := multi.ClientOpts(context.Background(), "static-web-client")
-	if err != nil || len(opts) == 0 {
-		t.Errorf("expected static client to have options, got %d, err: %v", len(opts), err)
-	}
-
-	opts, err = multi.ClientOpts(context.Background(), "dc.dynamic-web-client")
-	if err != nil || len(opts) == 0 {
-		t.Errorf("expected dynamic client to have options, got %d, err: %v", len(opts), err)
-	}
-
-	// Test 7: Public client handling
+	// Test: Public client handling (integration-specific scenario)
 	client, found = multi.GetClient("static-public-client")
 	if !found {
 		t.Fatal("expected to find public static client")
 	}
-	if !client.Public {
+	if !client.(*StaticClient).configClient.Public {
 		t.Error("expected client to be public")
-	}
-
-	// Test 8: Non-existent client handling
-	_, found = multi.GetClient("nonexistent")
-	if found {
-		t.Error("expected not to find nonexistent client")
-	}
-
-	valid, err = multi.IsValidClientID(context.Background(), "nonexistent")
-	if err != nil || valid {
-		t.Error("expected nonexistent client to be invalid")
 	}
 }

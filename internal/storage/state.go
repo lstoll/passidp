@@ -31,6 +31,9 @@ func NewState(path string) (*State, error) {
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketKeysets)); err != nil {
 			return fmt.Errorf("create keysets bucket: %w", err)
 		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketSessions)); err != nil {
+			return fmt.Errorf("create sessions bucket: %w", err)
+		}
 		return nil
 	}); err != nil {
 		db.Close()

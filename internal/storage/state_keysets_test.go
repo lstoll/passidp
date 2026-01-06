@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/tink-crypto/tink-go/v2/jwt"
@@ -12,16 +11,8 @@ import (
 )
 
 func TestKeysetStore(t *testing.T) {
-	// Create a temporary file for the BoltDB database
-	tmpfile, err := os.CreateTemp("", "test-keysets-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	tmpfile.Close()
-	defer os.Remove(tmpfile.Name())
-
 	// Create a new State instance
-	state, err := NewState(tmpfile.Name())
+	state, err := NewState(t.TempDir() + "/state.bolt")
 	if err != nil {
 		t.Fatalf("failed to create state: %v", err)
 	}
@@ -182,16 +173,8 @@ func TestKeysetStore(t *testing.T) {
 }
 
 func TestKeysetStoreOptimisticLocking(t *testing.T) {
-	// Create a temporary file for the BoltDB database
-	tmpfile, err := os.CreateTemp("", "test-keysets-lock-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	tmpfile.Close()
-	defer os.Remove(tmpfile.Name())
-
 	// Create a new State instance
-	state, err := NewState(tmpfile.Name())
+	state, err := NewState(t.TempDir() + "/state.bolt")
 	if err != nil {
 		t.Fatalf("failed to create state: %v", err)
 	}

@@ -32,7 +32,7 @@
                         <span class="icon">
                             <i class="fas fa-user"></i>
                         </span>
-                        <span>{{.Username}}</span>
+                        <span>{{.UserFullName | default .Username}}</span>
                     </span>
                     <a class="button is-light" href="/logout">
                         <span class="icon">

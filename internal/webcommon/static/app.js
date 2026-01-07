@@ -289,6 +289,23 @@ class WebAuthnUI {
                 this.hideError();
             });
         }
+
+        // Success message close button
+        const successDeleteButton = document.querySelector('#success-message .delete');
+        if (successDeleteButton) {
+            successDeleteButton.addEventListener('click', () => {
+                this.hideSuccess();
+            });
+        }
+
+        // Confirmation box close button
+        const confDeleteButton = document.querySelector('#confirmation-box .delete');
+        if (confDeleteButton) {
+            confDeleteButton.addEventListener('click', () => {
+                const confBox = document.getElementById('confirmation-box');
+                if (confBox) confBox.style.display = 'none';
+            });
+        }
     }
 
     /**
@@ -316,14 +333,22 @@ class WebAuthnUI {
             const responseData = await result.json();
 
             if (responseData.success) {
-                // Build success message with confirmation details
+                // Build success message
                 let successMsg = responseData.message || "Passkey registered successfully!";
+                
+                // If there's a confirmation key, show it in the dedicated box
                 if (responseData.confirmation_key) {
-                    successMsg += `\n\nConfirmation Key: ${responseData.confirmation_key}`;
+                    const confBox = document.getElementById('confirmation-box');
+                    const confKeyVal = document.getElementById('confirmation-key-value');
+                    const enrollIdVal = document.getElementById('enrollment-id-value');
+                    
+                    if (confBox && confKeyVal) {
+                        confKeyVal.textContent = responseData.confirmation_key;
+                        if (enrollIdVal) enrollIdVal.textContent = responseData.enrollment_id || 'N/A';
+                        confBox.style.display = 'block';
+                    }
                 }
-                if (responseData.enrollment_id) {
-                    successMsg += `\nEnrollment ID: ${responseData.enrollment_id}`;
-                }
+
                 // Store confirmation details in data attributes for easy extraction
                 if (responseData.confirmation_key) {
                     document.body.dataset.confirmationKey = responseData.confirmation_key;
@@ -331,8 +356,9 @@ class WebAuthnUI {
                 if (responseData.enrollment_id) {
                     document.body.dataset.enrollmentId = responseData.enrollment_id;
                 }
-                // Show success message
-                this.showSuccess(successMsg);
+                
+                // Show success message, auto-hide it as requested
+                this.showSuccess(successMsg, true);
 
                 // Don't redirect automatically when confirmation is needed
                 if (!responseData.confirmation_key && responseData.returnTo) {
@@ -392,8 +418,9 @@ class WebAuthnUI {
     /**
      * Show success message to user
      * @param {string} message - Success message
+     * @param {boolean} autoHide - Whether to auto-hide the message after a delay
      */
-    showSuccess(message) {
+    showSuccess(message, autoHide = true) {
         console.log("WebAuthnUI.showSuccess", message);
         // Try to find a success display element
         const successElement = document.getElementById('success-message');
@@ -403,10 +430,12 @@ class WebAuthnUI {
             successTextElement.textContent = message;
             successElement.style.display = 'block';
 
-            // Auto-hide after 5 seconds
-            setTimeout(() => {
-                this.hideSuccess();
-            }, 5000);
+            if (autoHide) {
+                // Auto-hide after 5 seconds
+                setTimeout(() => {
+                    this.hideSuccess();
+                }, 5000);
+            }
         } else {
             // Fallback to alert
             alert(message);
@@ -482,12 +511,169 @@ class WebAuthnUI {
     }
 }
 
+/**
+ * Grant Management UI - Handles active session list/revoke
+ */
+class GrantManagerUI {
+    constructor() {
+        if (!document.getElementById('grants-list') && !document.getElementById('no-grants')) {
+            return;
+        }
+        this.grants = [];
+        this.bindEvents();
+        this.loadGrants();
+    }
+
+    bindEvents() {
+        // Grant error close button
+        const errorDeleteButton = document.querySelector('#grants-error .delete');
+        if (errorDeleteButton) {
+            errorDeleteButton.addEventListener('click', () => {
+                const errorEl = document.getElementById('grants-error');
+                if (errorEl) errorEl.style.display = 'none';
+            });
+        }
+
+        // Grant success close button
+        const successDeleteButton = document.querySelector('#grants-success .delete');
+        if (successDeleteButton) {
+            successDeleteButton.addEventListener('click', () => {
+                const successEl = document.getElementById('grants-success');
+                if (successEl) successEl.style.display = 'none';
+            });
+        }
+    }
+
+    async loadGrants() {
+        const loadingEl = document.getElementById('grants-loading');
+        try {
+            const response = await fetch('/api/grants');
+            if (!response.ok) {
+                 if (response.status === 401 || response.status === 403) {
+                    throw new Error('Not authenticated. Please log in.');
+                }
+                const errorText = await response.text();
+                throw new Error(`Failed to load grants: ${response.status} ${errorText}`);
+            }
+            const data = await response.json();
+            this.grants = data.grants || [];
+            this.renderGrants();
+        } catch (error) {
+            console.error('Error loading grants:', error);
+            if (loadingEl) {
+                loadingEl.innerHTML = `<p class="has-text-danger">Error: ${error.message}</p>`;
+            } else {
+                 this.showError('Failed to load sessions: ' + error.message);
+            }
+        } finally {
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+        }
+    }
+
+    renderGrants() {
+        const tbody = document.getElementById('grants-table-body');
+        const listEl = document.getElementById('grants-list');
+        const noGrantsEl = document.getElementById('no-grants');
+
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        if (this.grants.length === 0) {
+            if (listEl) listEl.style.display = 'none';
+            if (noGrantsEl) noGrantsEl.style.display = 'block';
+            return;
+        }
+
+        if (listEl) listEl.style.display = 'block';
+        if (noGrantsEl) noGrantsEl.style.display = 'none';
+
+        this.grants.forEach(grant => {
+            const row = document.createElement('tr');
+            const grantedDate = new Date(grant.granted_at).toLocaleString();
+            const expiresDate = new Date(grant.expires_at).toLocaleString();
+            
+            row.innerHTML = `
+                <td class="pl-5">${this.escapeHtml(grant.client_id)}</td>
+                <td>${grantedDate}</td>
+                <td>${expiresDate}</td>
+                <td class="pr-5">
+                    <button class="button is-warning is-small revoke-grant" data-id="${grant.id}">
+                        <span class="icon">
+                            <i class="fas fa-ban"></i>
+                        </span>
+                        <span>Revoke</span>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+
+        document.querySelectorAll('.revoke-grant').forEach(btn => {
+            btn.addEventListener('click', () => this.revokeGrant(btn.dataset.id));
+        });
+    }
+
+    async revokeGrant(grantId) {
+        if (!confirm('Are you sure you want to revoke this session? The application will lose access.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/grants/${grantId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to revoke session');
+            }
+
+            this.showSuccess('Session revoked successfully');
+            await this.loadGrants();
+        } catch (error) {
+            console.error('Error revoking grant:', error);
+            this.showError(`Failed to revoke session: ${error.message}`);
+        }
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    showError(message) {
+        const errorEl = document.getElementById('grants-error');
+        const errorTextEl = document.querySelector('#grants-error .error-text');
+        if (errorEl && errorTextEl) {
+            errorTextEl.textContent = message;
+            errorEl.style.display = 'block';
+            setTimeout(() => errorEl.style.display = 'none', 5000);
+        }
+    }
+
+    showSuccess(message, autoHide = true) {
+        const successEl = document.getElementById('grants-success');
+        const successTextEl = document.querySelector('#grants-success .success-text');
+        if (successEl && successTextEl) {
+            successTextEl.textContent = message;
+            successEl.style.display = 'block';
+            if (autoHide) {
+                setTimeout(() => successEl.style.display = 'none', 5000);
+            }
+        }
+    }
+}
+
 // Initialize WebAuthn UI when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     new WebAuthnUI();
+    new GrantManagerUI();
 });
 
 // Export for potential module usage
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { WebAuthn, WebAuthnUI };
+    module.exports = { WebAuthn, WebAuthnUI, GrantManagerUI };
 }

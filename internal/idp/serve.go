@@ -213,6 +213,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 	auth := &auth.Authenticator{
 		Webauthn:  wn,
 		CredStore: credStore,
+		State:     state,
 		Config:    cfg,
 	}
 	auth.AddHandlers(websvr)

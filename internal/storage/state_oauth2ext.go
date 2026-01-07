@@ -357,3 +357,86 @@ func (s *State) GetGrantByRefreshToken(ctx context.Context, refreshToken []byte)
 
 	return grant, nil
 }
+
+// ListActiveGrantsForUser retrieves all active grants for a specific user
+func (s *State) ListActiveGrantsForUser(ctx context.Context, userID string) ([]*oauth2as.StoredGrant, error) {
+	var grants []*oauth2as.StoredGrant
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketGrants))
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var gJSON storedGrantJSON
+			if err := json.Unmarshal(v, &gJSON); err != nil {
+				continue // skip malformed
+			}
+
+			if gJSON.UserID != userID {
+				continue
+			}
+
+			// Check if active: has refresh token and not expired
+			if len(gJSON.RefreshToken) == 0 {
+				continue
+			}
+			if time.Now().After(gJSON.ExpiresAt) {
+				continue
+			}
+
+			grants = append(grants, gJSON.toStoredGrant())
+		}
+		return nil
+	})
+	return grants, err
+}
+
+// RevokeGrant revokes a grant by removing its refresh token
+func (s *State) RevokeGrant(ctx context.Context, id uuid.UUID) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		grantsBucket := tx.Bucket([]byte(bucketGrants))
+		if grantsBucket == nil {
+			return nil
+		}
+		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
+		if refreshTokensBucket == nil {
+			return nil
+		}
+
+		grantKey := id[:]
+		grantData := grantsBucket.Get(grantKey)
+		if grantData == nil {
+			return nil // already gone
+		}
+
+		var gJSON storedGrantJSON
+		if err := json.Unmarshal(grantData, &gJSON); err != nil {
+			return fmt.Errorf("unmarshal grant: %w", err)
+		}
+
+		// Delete refresh token index
+		if len(gJSON.RefreshToken) > 0 {
+			if err := refreshTokensBucket.Delete(gJSON.RefreshToken); err != nil {
+				return fmt.Errorf("delete refresh token mapping: %w", err)
+			}
+		}
+
+		// Clear refresh token from grant record
+		gJSON.RefreshToken = nil
+
+		// Marshal updated grant
+		updatedData, err := json.Marshal(&gJSON)
+		if err != nil {
+			return fmt.Errorf("marshal updated grant: %w", err)
+		}
+
+		// Save updated grant
+		if err := grantsBucket.Put(grantKey, updatedData); err != nil {
+			return fmt.Errorf("update grant: %w", err)
+		}
+
+		return nil
+	})
+}

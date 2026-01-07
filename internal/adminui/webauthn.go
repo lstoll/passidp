@@ -100,12 +100,21 @@ func (w *WebAuthnManager) registration(ctx context.Context, rw web.ResponseWrite
 		return fmt.Errorf("no enroll to user id set in session")
 	}
 
+	user, err := w.config.Users.GetUserByStringID(pwe.ForUserID)
+	if err != nil {
+		return fmt.Errorf("get user %s: %w", pwe.ForUserID, err)
+	}
+
 	return rw.WriteResponse(req, &web.TemplateResponse{
 		Templates: templates,
 		Name:      "register.tmpl.html",
 		Data: registerData{
 			LayoutData: webcommon.LayoutData{
-				Title: "Register Passkey - IDP",
+				Title:        "Register Passkey - IDP",
+				UserLoggedIn: true,
+				Username:     user.Email,
+				UserFullName: user.FullName,
+				UserEmail:    user.Email,
 			},
 		},
 	})
@@ -225,7 +234,7 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 	return rw.WriteResponse(req, &web.JSONResponse{
 		Data: map[string]interface{}{
 			"success":         true,
-			"message":         "Passkey registered successfully! Please provide the confirmation key to your administrator.",
+			"message":         "Passkey registered successfully!",
 			"confirmation_key": confirmationKey,
 			"enrollment_id":    enrollment.ID.String(),
 			"returnTo":         returnTo,

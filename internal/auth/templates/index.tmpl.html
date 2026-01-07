@@ -4,8 +4,69 @@
                 <div class="column is-half">
                     <div class="card">
                         <div class="card-content">
-                            <div class="content has-text-centered">
-                                <h1 class="title is-3">Welcome</h1>
+                            <div class="content">
+                                <h1 class="title is-3">Welcome, {{.UserFullName}}</h1>
+                                <p class="subtitle is-6 has-text-grey">{{.UserEmail}}</p>
+
+                                <div id="error-message" class="notification is-danger" style="display: none;">
+                                    <button class="delete"></button>
+                                    <span class="error-text"></span>
+                                </div>
+
+                                <div id="success-message" class="notification is-success" style="{{if not .SuccessMessage}}display: none;{{end}}">
+                                    <button class="delete"></button>
+                                    <span class="success-text">{{.SuccessMessage}}</span>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="columns is-centered mt-5">
+                <div class="column is-three-quarters">
+                    <div class="card">
+                        <header class="card-header">
+                            <p class="card-header-title">
+                                <span class="icon mr-2">
+                                    <i class="fas fa-history"></i>
+                                </span>
+                                Active Sessions
+                            </p>
+                        </header>
+                        <div class="card-content p-0">
+                            <div id="grants-error" class="notification is-danger m-4" style="display: none;">
+                                <button class="delete"></button>
+                                <span class="error-text"></span>
+                            </div>
+
+                            <div id="grants-success" class="notification is-success m-4" style="display: none;">
+                                <button class="delete"></button>
+                                <span class="success-text"></span>
+                            </div>
+
+                            <div id="grants-loading" class="has-text-centered p-5">
+                                <p>Loading active sessions...</p>
+                            </div>
+
+                            <div id="grants-list" style="display: none;">
+                                <table class="table is-fullwidth is-hoverable mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th class="pl-5">Client</th>
+                                            <th>Granted</th>
+                                            <th>Expires</th>
+                                            <th class="pr-5">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="grants-table-body">
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div id="no-grants" class="p-5" style="display: none;">
+                                <p class="has-text-grey">No active sessions.</p>
                             </div>
                         </div>
                     </div>

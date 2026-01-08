@@ -7,15 +7,13 @@ import (
 )
 
 func TestSessionKV(t *testing.T) {
-	// Create a new State instance
 	state, err := NewState(t.TempDir() + "/state.bolt")
 	if err != nil {
 		t.Fatalf("failed to create state: %v", err)
 	}
 	defer state.db.Close()
 
-	// Create a SessionKV
-	kv := NewSessionKV(state)
+	kv := state.SessionKV()
 
 	key := "test-session-key"
 	value := []byte("test-session-value")
@@ -108,8 +106,7 @@ func TestSessionKVGC(t *testing.T) {
 	}
 	defer state.db.Close()
 
-	// Create a SessionKV
-	kv := NewSessionKV(state)
+	kv := state.SessionKV()
 
 	// Create some expired sessions
 	expiredKeys := []string{"expired1", "expired2", "expired3"}
@@ -132,7 +129,7 @@ func TestSessionKVGC(t *testing.T) {
 	}
 
 	// Run GC
-	deleted, err := kv.GC(context.Background())
+	deleted, err := kv.GC()
 	if err != nil {
 		t.Fatalf("failed to run GC: %v", err)
 	}
@@ -170,15 +167,13 @@ func TestSessionKVGC(t *testing.T) {
 }
 
 func TestSessionKVMultipleSessions(t *testing.T) {
-	// Create a new State instance
 	state, err := NewState(t.TempDir() + "/state.bolt")
 	if err != nil {
 		t.Fatalf("failed to create state: %v", err)
 	}
 	defer state.db.Close()
 
-	// Create a SessionKV
-	kv := NewSessionKV(state)
+	kv := state.SessionKV()
 
 	// Create multiple sessions
 	sessions := map[string][]byte{

@@ -77,7 +77,7 @@ func (w *WebAuthnManager) registration(ctx context.Context, rw web.ResponseWrite
 			return fmt.Errorf("invalid user_id: %w", err)
 		}
 
-		enrollment, err := w.state.GetPendingEnrollmentByKey(et)
+		enrollment, err := w.state.PendingEnrollments().GetPendingEnrollmentByKey(et)
 		if err != nil {
 			return fmt.Errorf("invalid enrollment token: %w", err)
 		}
@@ -208,7 +208,7 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 		return fmt.Errorf("invalid enrollment_id: %w", err)
 	}
 
-	enrollment, err := w.state.GetPendingEnrollmentByID(enrollmentID)
+	enrollment, err := w.state.PendingEnrollments().GetPendingEnrollmentByID(enrollmentID)
 	if err != nil {
 		return fmt.Errorf("get pending enrollment: %w", err)
 	}
@@ -226,15 +226,15 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 	confirmationKey := uuid.New().String()
 
 	// Store the credential as a pending enrollment (not active yet)
-	if err := w.state.UpdatePendingEnrollment(enrollment.ID, credential.ID, credential, keyName, confirmationKey); err != nil {
+	if err := w.state.PendingEnrollments().UpdatePendingEnrollment(enrollment.ID, credential.ID, credential, keyName, confirmationKey); err != nil {
 		return fmt.Errorf("update pending enrollment: %w", err)
 	}
 
 	// Return success response with confirmation key
 	return rw.WriteResponse(req, &web.JSONResponse{
 		Data: map[string]interface{}{
-			"success":         true,
-			"message":         "Passkey registered successfully!",
+			"success":          true,
+			"message":          "Passkey registered successfully!",
 			"confirmation_key": confirmationKey,
 			"enrollment_id":    enrollment.ID.String(),
 			"returnTo":         returnTo,

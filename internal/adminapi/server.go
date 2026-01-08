@@ -114,7 +114,7 @@ func (s *Server) handleCreateEnrollment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	enrollment, err := s.state.CreatePendingEnrollment(userID)
+	enrollment, err := s.state.PendingEnrollments().CreatePendingEnrollment(userID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("create enrollment: %v", err), http.StatusInternalServerError)
 		return
@@ -136,8 +136,8 @@ func (s *Server) handleCreateEnrollment(w http.ResponseWriter, r *http.Request) 
 }
 
 type ConfirmEnrollmentRequest struct {
-	UserID         string `json:"user_id"`
-	EnrollmentID   string `json:"enrollment_id"`
+	UserID          string `json:"user_id"`
+	EnrollmentID    string `json:"enrollment_id"`
 	ConfirmationKey string `json:"confirmation_key"`
 }
 
@@ -165,7 +165,7 @@ func (s *Server) handleConfirmEnrollment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	enrollment, err := s.state.ConfirmPendingEnrollment(enrollmentID, req.ConfirmationKey)
+	enrollment, err := s.state.PendingEnrollments().ConfirmPendingEnrollment(enrollmentID, req.ConfirmationKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("confirm enrollment: %v", err), http.StatusBadRequest)
 		return

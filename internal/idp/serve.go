@@ -55,6 +55,8 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config) error {
 		return fmt.Errorf("open state from %s: %w", c.StatePath, err)
 	}
 
+	g.Add(state.GarbageCollector(1 * time.Hour))
+
 	// Create multi-clients that combines both
 	multiClients := clients.NewMultiClients(&clients.StaticClients{
 		Clients: config.Clients},
@@ -144,7 +146,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		return nil, fmt.Errorf("initializing keysets: %w", err)
 	}
 
-	sesskv := storage.NewSessionKV(state)
+	sesskv := state.SessionKV()
 
 	sessionManager, err := session.NewKVManager(sesskv, nil)
 	if err != nil {
@@ -226,7 +228,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 
 	oauth2asConfig := oauth2as.Config{
 		Issuer:   issuerURL.String(),
-		Storage:  state,
+		Storage:  state.OAuth2State(),
 		Clients:  clients,
 		Signer:   oidcHandles,
 		Verifier: oidcHandles,

@@ -19,6 +19,8 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 	defer state.db.Close()
 
+	oauth2State := state.OAuth2State()
+
 	// Test creating a grant
 	grantID := uuid.New()
 	authCode := make([]byte, 32)
@@ -46,12 +48,12 @@ func TestStateOAuth2Storage(t *testing.T) {
 		GrantedAt: time.Now(),
 	}
 
-	if err := state.CreateGrant(context.Background(), grant); err != nil {
+	if err := oauth2State.CreateGrant(context.Background(), grant); err != nil {
 		t.Fatalf("failed to create grant: %v", err)
 	}
 
 	// Test retrieving by ID
-	retrieved, err := state.GetGrant(context.Background(), grantID)
+	retrieved, err := oauth2State.GetGrant(context.Background(), grantID)
 	if err != nil {
 		t.Fatalf("failed to get grant: %v", err)
 	}
@@ -75,7 +77,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Test retrieving by auth code
-	retrievedByAuthCode, err := state.GetGrantByAuthCode(context.Background(), authCode)
+	retrievedByAuthCode, err := oauth2State.GetGrantByAuthCode(context.Background(), authCode)
 	if err != nil {
 		t.Fatalf("failed to get grant by auth code: %v", err)
 	}
@@ -87,7 +89,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Test retrieving by refresh token
-	retrievedByRefreshToken, err := state.GetGrantByRefreshToken(context.Background(), refreshToken)
+	retrievedByRefreshToken, err := oauth2State.GetGrantByRefreshToken(context.Background(), refreshToken)
 	if err != nil {
 		t.Fatalf("failed to get grant by refresh token: %v", err)
 	}
@@ -106,12 +108,12 @@ func TestStateOAuth2Storage(t *testing.T) {
 	grant.RefreshToken = newRefreshToken
 	grant.GrantedScopes = []string{"openid", "profile", "email"}
 
-	if err := state.UpdateGrant(context.Background(), grant); err != nil {
+	if err := oauth2State.UpdateGrant(context.Background(), grant); err != nil {
 		t.Fatalf("failed to update grant: %v", err)
 	}
 
 	// Verify update
-	updated, err := state.GetGrant(context.Background(), grantID)
+	updated, err := oauth2State.GetGrant(context.Background(), grantID)
 	if err != nil {
 		t.Fatalf("failed to get updated grant: %v", err)
 	}
@@ -126,7 +128,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Verify old refresh token no longer works
-	oldTokenGrant, err := state.GetGrantByRefreshToken(context.Background(), refreshToken)
+	oldTokenGrant, err := oauth2State.GetGrantByRefreshToken(context.Background(), refreshToken)
 	if err != nil {
 		t.Fatalf("failed to get grant by old refresh token: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Verify new refresh token works
-	newTokenGrant, err := state.GetGrantByRefreshToken(context.Background(), newRefreshToken)
+	newTokenGrant, err := oauth2State.GetGrantByRefreshToken(context.Background(), newRefreshToken)
 	if err != nil {
 		t.Fatalf("failed to get grant by new refresh token: %v", err)
 	}
@@ -147,12 +149,12 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Test expiring a grant
-	if err := state.ExpireGrant(context.Background(), grantID); err != nil {
+	if err := oauth2State.ExpireGrant(context.Background(), grantID); err != nil {
 		t.Fatalf("failed to expire grant: %v", err)
 	}
 
 	// Test that expired grant is not returned
-	expiredGrant, err := state.GetGrant(context.Background(), grantID)
+	expiredGrant, err := oauth2State.GetGrant(context.Background(), grantID)
 	if err != nil {
 		t.Fatalf("failed to get expired grant: %v", err)
 	}
@@ -161,7 +163,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Test that expired grant is not returned by auth code
-	expiredByAuthCode, err := state.GetGrantByAuthCode(context.Background(), authCode)
+	expiredByAuthCode, err := oauth2State.GetGrantByAuthCode(context.Background(), authCode)
 	if err != nil {
 		t.Fatalf("failed to get expired grant by auth code: %v", err)
 	}
@@ -170,7 +172,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// Test that expired grant is not returned by refresh token
-	expiredByRefreshToken, err := state.GetGrantByRefreshToken(context.Background(), newRefreshToken)
+	expiredByRefreshToken, err := oauth2State.GetGrantByRefreshToken(context.Background(), newRefreshToken)
 	if err != nil {
 		t.Fatalf("failed to get expired grant by refresh token: %v", err)
 	}

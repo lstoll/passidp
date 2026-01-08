@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -21,11 +20,6 @@ const (
 // SessionKV implements session.KV using BoltDB
 type SessionKV struct {
 	db *bolt.DB
-}
-
-// NewSessionKV creates a new SessionKV from a State instance
-func NewSessionKV(state *State) *SessionKV {
-	return &SessionKV{db: state.db}
 }
 
 // storedSession represents a session stored in BoltDB
@@ -116,7 +110,7 @@ func (s *SessionKV) Delete(ctx context.Context, key string) error {
 }
 
 // GC performs garbage collection, removing expired sessions
-func (s *SessionKV) GC(ctx context.Context) (deleted int, _ error) {
+func (s *SessionKV) GC() (deleted int, _ error) {
 	var count int
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketSessions))
@@ -163,31 +157,4 @@ func (s *SessionKV) GC(ctx context.Context) (deleted int, _ error) {
 	}
 
 	return count, nil
-}
-
-// RunGC starts a background goroutine that performs garbage collection at regular intervals
-func (s *SessionKV) RunGC(ctx context.Context, interval time.Duration, logger *slog.Logger) {
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				if logger != nil {
-					logger.InfoContext(ctx, "Garbage collection stopped", "reason", ctx.Err())
-				}
-				return
-			case <-ticker.C:
-				deleted, err := s.GC(ctx)
-				if err != nil {
-					if logger != nil {
-						logger.ErrorContext(ctx, "Garbage collection failed", "error", err)
-					}
-				} else if logger != nil {
-					logger.InfoContext(ctx, "Garbage collection successful", "deleted_sessions", deleted)
-				}
-			}
-		}
-	}()
 }

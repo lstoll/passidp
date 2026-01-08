@@ -2,18 +2,31 @@ package storage
 
 import (
 	"fmt"
+	"log/slog"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
 
+// expectedBuckets is the set of bucket names that should exist in the database
+var expectedBuckets = map[string]bool{
+	bucketGrants:                 true,
+	bucketAuthCodes:              true,
+	bucketRefreshTokens:          true,
+	bucketKeysets:                true,
+	bucketSessions:               true,
+	bucketDynamicClients:         true,
+	bucketDynamicClientsBySecret: true,
+	bucketPendingEnrollments:     true,
+}
+
 // State represents the on-disk runtime state for the IDP.
 type State struct {
 	db *bolt.DB
-}
 
-// Close closes the BoltDB database
-func (s *State) Close() error {
-	return s.db.Close()
+	pendingEnrollments *PendingEnrollments
+	sessionKV          *SessionKV
+	oauth2State        *OAuth2State
 }
 
 func NewState(path string) (*State, error) {
@@ -22,37 +35,123 @@ func NewState(path string) (*State, error) {
 		return nil, fmt.Errorf("open bolt db: %w", err)
 	}
 
-	// Initialize buckets
+	// Initialize buckets and clean up unexpected ones
+	var deletedBuckets []string
 	if err := db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketGrants)); err != nil {
-			return fmt.Errorf("create grants bucket: %w", err)
+		for bucketName := range expectedBuckets {
+			if _, err := tx.CreateBucketIfNotExists([]byte(bucketName)); err != nil {
+				return fmt.Errorf("create bucket %s: %w", bucketName, err)
+			}
 		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketAuthCodes)); err != nil {
-			return fmt.Errorf("create auth codes bucket: %w", err)
+
+		var bucketsToDelete [][]byte
+		if err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			if !expectedBuckets[string(name)] {
+				bucketsToDelete = append(bucketsToDelete, name)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("iterate buckets: %w", err)
 		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketRefreshTokens)); err != nil {
-			return fmt.Errorf("create refresh tokens bucket: %w", err)
+
+		for _, name := range bucketsToDelete {
+			bucketName := string(name)
+			if err := tx.DeleteBucket(name); err != nil {
+				return fmt.Errorf("delete unexpected bucket %s: %w", bucketName, err)
+			}
+			deletedBuckets = append(deletedBuckets, bucketName)
 		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketKeysets)); err != nil {
-			return fmt.Errorf("create keysets bucket: %w", err)
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketSessions)); err != nil {
-			return fmt.Errorf("create sessions bucket: %w", err)
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketDynamicClients)); err != nil {
-			return fmt.Errorf("create dynamic_clients bucket: %w", err)
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketDynamicClientsBySecret)); err != nil {
-			return fmt.Errorf("create dynamic_clients_by_secret bucket: %w", err)
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketPendingEnrollments)); err != nil {
-			return fmt.Errorf("create pending_enrollments bucket: %w", err)
-		}
+
 		return nil
 	}); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialize buckets: %w", err)
 	}
 
-	return &State{db: db}, nil
+	if len(deletedBuckets) > 0 {
+		log := slog.With("component", "storage")
+		log.Info("deleted unexpected buckets", slog.Any("buckets", deletedBuckets))
+	}
+
+	s := &State{
+		db:                 db,
+		pendingEnrollments: &PendingEnrollments{db: db},
+		sessionKV:          &SessionKV{db: db},
+		oauth2State:        &OAuth2State{db: db},
+	}
+
+	return s, nil
+}
+
+// Close closes the BoltDB database
+func (s *State) Close() error {
+	return s.db.Close()
+}
+
+// PendingEnrollments returns a PendingEnrollments instance for managing pending enrollments
+func (s *State) PendingEnrollments() *PendingEnrollments {
+	return s.pendingEnrollments
+}
+
+func (s *State) SessionKV() *SessionKV {
+	return s.sessionKV
+}
+
+// OAuth2State returns an OAuth2State instance for managing OAuth2 grants
+func (s *State) OAuth2State() *OAuth2State {
+	return s.oauth2State
+}
+
+func (s *State) GarbageCollector(interval time.Duration) (execute func() error, interrupt func(error)) {
+	stopCh := make(chan struct{})
+
+	return func() error {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			// do an initial run.
+			s.runGC()
+
+			for {
+				select {
+				case <-ticker.C:
+					s.runGC()
+				case <-stopCh:
+					return nil
+				}
+			}
+		},
+		func(error) {
+			close(stopCh)
+		}
+}
+
+func (s *State) runGC() {
+	log := slog.With("component", "garbage_collector")
+
+	log.Info("starting")
+
+	if deleted, err := s.pendingEnrollments.GarbageCollectPendingEnrollments(); err != nil {
+		log.Error("garbage collect pending enrollments", slog.String("error", err.Error()))
+	} else if deleted > 0 {
+		log.Info("garbage collected pending enrollments", slog.Int("deleted", deleted))
+	}
+
+	authCodesDeleted, refreshTokensDeleted, grantsDeleted, err := s.oauth2State.GarbageCollect()
+	if err != nil {
+		log.Error("garbage collect oauth2 state", slog.String("error", err.Error()))
+	} else if authCodesDeleted > 0 || refreshTokensDeleted > 0 || grantsDeleted > 0 {
+		log.Info("garbage collected oauth2 state",
+			slog.Int("auth_codes_deleted", authCodesDeleted),
+			slog.Int("refresh_tokens_deleted", refreshTokensDeleted),
+			slog.Int("grants_deleted", grantsDeleted))
+	}
+
+	if deleted, err := s.sessionKV.GC(); err != nil {
+		log.Error("garbage collect sessions", slog.String("error", err.Error()))
+	} else if deleted > 0 {
+		log.Info("garbage collected sessions", slog.Int("deleted", deleted))
+	}
+
+	log.Info("finished garbage collection")
 }

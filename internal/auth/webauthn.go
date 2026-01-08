@@ -271,7 +271,7 @@ func (a *Authenticator) HandleListGrants(ctx context.Context, w web.ResponseWrit
 		return httperror.BadRequestErrf("user not logged in")
 	}
 
-	grants, err := a.State.ListActiveGrantsForUser(ctx, userID.String())
+	grants, err := a.State.OAuth2State().ListActiveGrantsForUser(ctx, userID.String())
 	if err != nil {
 		return fmt.Errorf("list active grants: %w", err)
 	}
@@ -315,7 +315,7 @@ func (a *Authenticator) HandleRevokeGrant(ctx context.Context, w web.ResponseWri
 		return httperror.BadRequestErrf("invalid grant ID: %w", err)
 	}
 
-	grant, err := a.State.GetGrant(ctx, grantID)
+	grant, err := a.State.OAuth2State().GetGrant(ctx, grantID)
 	if err != nil {
 		return fmt.Errorf("get grant: %w", err)
 	}
@@ -326,7 +326,7 @@ func (a *Authenticator) HandleRevokeGrant(ctx context.Context, w web.ResponseWri
 		return httperror.NotFoundErrf("grant not found")
 	}
 
-	if err := a.State.RevokeGrant(ctx, grantID); err != nil {
+	if err := a.State.OAuth2State().RevokeGrant(ctx, grantID); err != nil {
 		return fmt.Errorf("revoke grant: %w", err)
 	}
 

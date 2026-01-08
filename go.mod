@@ -3,7 +3,6 @@ module lds.li/webauthn-oidc-idp
 go 1.25
 
 require (
-	crawshaw.dev/jsonfile v0.0.0-00010101000000-000000000000
 	github.com/alecthomas/kong v1.13.0
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.2
@@ -26,6 +25,7 @@ require (
 )
 
 require (
+	crawshaw.dev/jsonfile v0.0.0-20240206193014-699d1dad804e // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
@@ -47,5 +47,3 @@ require (
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 )
-
-replace crawshaw.dev/jsonfile => github.com/sr/jsonfile v0.0.0-20240301210704-69e8a5b5b148

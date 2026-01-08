@@ -21,6 +21,7 @@ import (
 	"lds.li/web/proxyhdrs"
 	"lds.li/web/requestid"
 	"lds.li/web/session"
+	"lds.li/webauthn-oidc-idp/internal/adminapi"
 	"lds.li/webauthn-oidc-idp/internal/adminui"
 	"lds.li/webauthn-oidc-idp/internal/auth"
 	"lds.li/webauthn-oidc-idp/internal/clients"
@@ -37,6 +38,7 @@ type ServeCmd struct {
 	KeyFile             string `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
 	CredentialStorePath string `env:"IDP_CREDENTIAL_STORE_PATH" required:"" help:"Path to the credential store file."`
 	StatePath           string `env:"IDP_STATE_PATH" required:"" help:"Path to the state file."`
+	AdminSocketPath     string `env:"IDP_ADMIN_SOCKET_PATH" help:"Path to Unix socket for admin API (optional)."`
 }
 
 func (c *ServeCmd) Run(ctx context.Context, config *config.Config) error {
@@ -62,6 +64,14 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config) error {
 	idph, err := NewIDP(ctx, &g, config, credStore, state, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
+	}
+
+	// Start admin API server if socket path is provided
+	if c.AdminSocketPath != "" {
+		adminServer := adminapi.NewServer(state, config, credStore, c.AdminSocketPath)
+		if err := adminServer.Start(ctx, &g); err != nil {
+			return fmt.Errorf("start admin API server: %w", err)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -196,7 +206,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 	}
 
 	// start configuration of webauthn manager
-	mgr := adminui.NewWebAuthnManager(cfg, credStore, wn)
+	mgr := adminui.NewWebAuthnManager(cfg, credStore, state, wn)
 
 	mgr.AddHandlers(websvr)
 

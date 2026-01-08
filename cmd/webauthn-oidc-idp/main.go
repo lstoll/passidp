@@ -54,8 +54,11 @@ var rootCmd = struct {
 
 	Version kong.VersionFlag `help:"Print version information"`
 
-	Serve         idp.ServeCmd              `cmd:"" help:"Serve the IDP server."`
-	AddCredential admincli.AddCredentialCmd `cmd:"" help:"Add a credential to a user."`
+	Serve            idp.ServeCmd                 `cmd:"" help:"Serve the IDP server."`
+	AddCredential    admincli.AddCredentialCmd     `cmd:"" help:"Add a credential to a user."`
+	ConfirmCredential admincli.ConfirmCredentialCmd `cmd:"" help:"Confirm a pending credential enrollment."`
+	ListCredentials  admincli.ListCredentialsCmd   `cmd:"" help:"List all credentials."`
+	DeleteCredential admincli.DeleteCredentialCmd  `cmd:"" help:"Delete a credential."`
 }{}
 
 func main() {

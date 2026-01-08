@@ -42,6 +42,8 @@ func browserStepTimeout() time.Duration {
 	return 5 * time.Second
 }
 
+const testUserID = "4854735c-5a01-4a2d-b7a0-330a5b5928a9"
+
 func TestE2E(t *testing.T) {
 	runE2E, _ := strconv.ParseBool(os.Getenv("TEST_E2E"))
 	runE2EHeadless, _ := strconv.ParseBool(os.Getenv("TEST_E2E_HEADLESS"))
@@ -92,6 +94,7 @@ func TestE2E(t *testing.T) {
 	/* start an instance of the server */
 	credstorePath := t.TempDir() + "/credential-store.json"
 	statePath := t.TempDir() + "/state.bolt"
+	adminSocketPath := t.TempDir() + "/admin.sock"
 
 	port := mustAllocatePort()
 
@@ -139,6 +142,7 @@ func TestE2E(t *testing.T) {
 			KeyFile:             keyPath,
 			CredentialStorePath: credstorePath,
 			StatePath:           statePath,
+			AdminSocketPath:     adminSocketPath,
 		}
 		serveErr <- idpCmd.Run(serveCtx, config)
 	}()
@@ -202,27 +206,35 @@ func TestE2E(t *testing.T) {
 	testOk := t.Run("Registration", func(t *testing.T) {
 		var enrollBuf bytes.Buffer
 		addCredCmd := &admincli.AddCredentialCmd{
-			UserID: "4854735c-5a01-4a2d-b7a0-330a5b5928a9",
-			Output: &enrollBuf,
+			UserID:     testUserID,
+			SocketPath: adminSocketPath,
+			Output:     &enrollBuf,
 		}
 		if err := addCredCmd.Run(ctx, config); err != nil {
 			t.Fatalf("enrolling user: %v", err)
 		}
 
-		// Parse the enrollment URL from enrollBuf
+		// Parse the enrollment URL, enrollment ID from enrollBuf
 		var enrollmentURL string
+		var enrollmentID string
 		for _, line := range strings.Split(enrollBuf.String(), "\n") {
-			if strings.HasPrefix(line, "Enroll at: ") {
-				enrollmentURL = strings.TrimPrefix(line, "Enroll at: ")
-				enrollmentURL = strings.TrimSpace(enrollmentURL)
+			if rest, ok := strings.CutPrefix(line, "Enroll at: "); ok {
+				enrollmentURL = strings.TrimSpace(rest)
+			}
+			if rest, ok := strings.CutPrefix(line, "Enrollment ID: "); ok {
+				enrollmentID = strings.TrimSpace(rest)
 			}
 		}
 		if enrollmentURL == "" {
 			t.Fatalf("failed to parse enrollment URL from output: %q", enrollBuf.String())
 		}
+		if enrollmentID == "" {
+			t.Fatalf("failed to parse enrollment ID from output: %q", enrollBuf.String())
+		}
 
 		runErrC := make(chan error, 1)
 		doneC := make(chan struct{}, 1)
+		var confirmationKey string
 		go func() {
 			err := chromedp.Run(ctx,
 				chromedp.Navigate(enrollmentURL),
@@ -231,6 +243,8 @@ func TestE2E(t *testing.T) {
 				chromedp.Click(`#register-button`),
 				// Wait for success message
 				chromedp.WaitVisible(`#success-message`),
+				// Extract confirmation key from data attribute
+				chromedp.Evaluate(`document.body.dataset.confirmationKey || ''`, &confirmationKey),
 				// Wait a bit for the success message to be visible
 				chromedp.Sleep(1*time.Second),
 			)
@@ -248,6 +262,23 @@ func TestE2E(t *testing.T) {
 		case <-time.After(browserStepTimeout()):
 			t.Fatal("step timed out")
 		case <-doneC:
+		}
+
+		if confirmationKey == "" {
+			t.Fatal("failed to extract confirmation key from enrollment response")
+		}
+
+		// Confirm the enrollment
+		var confirmBuf bytes.Buffer
+		confirmCmd := &admincli.ConfirmCredentialCmd{
+			UserID:          testUserID,
+			EnrollmentID:    enrollmentID,
+			ConfirmationKey: confirmationKey,
+			SocketPath:      adminSocketPath,
+			Output:          &confirmBuf,
+		}
+		if err := confirmCmd.Run(ctx, config); err != nil {
+			t.Fatalf("confirming enrollment: %v", err)
 		}
 
 		credStore, err := storage.OpenCredentialStore(credstorePath)

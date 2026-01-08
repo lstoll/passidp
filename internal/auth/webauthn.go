@@ -65,7 +65,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 
 		sess, _ := session.FromContext(r.Context())
 		as, ok := sess.Get(authSessSessionKey).(*authSess)
-		if !ok || !as.LoggedinUserID.Valid {
+		if !ok || !as.LoggedinUserID.Valid || time.Now().After(as.ExpiresAt) {
 			a.TriggerLogin(w, r, r.URL.Path)
 			return
 		}
@@ -236,6 +236,7 @@ func (a *Authenticator) DoLogin(ctx context.Context, w web.ResponseWriter, r *we
 	// we cast it back to our type to make sure we get the real ID, not the
 	// potentially legacy mapped ID.
 	as.LoggedinUserID = uuid.NullUUID{UUID: user.(*WebAuthnUser).user.ID, Valid: true}
+	as.ExpiresAt = time.Now().Add(a.Config.ParsedSessionDuration)
 	r.Session().Set(authSessSessionKey, as)
 
 	// Return the flow's returnTo URL

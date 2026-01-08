@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/descope/virtualwebauthn"
 	_ "github.com/mattn/go-sqlite3"
@@ -57,7 +59,7 @@ func TestWebauthnAuth(t *testing.T) {
 	auth := &Authenticator{
 		Webauthn:  wn,
 		CredStore: credStore,
-		Config:    &config.Config{},
+		Config:    &config.Config{ParsedSessionDuration: 1 * time.Hour},
 	}
 
 	t.Run("login", func(t *testing.T) {
@@ -189,6 +191,31 @@ func TestWebauthnAuth(t *testing.T) {
 		}
 
 		t.Logf("login successful, returnTo: %s", loginResponse.ReturnTo)
+
+		if as.ExpiresAt.IsZero() {
+			t.Fatal("ExpiresAt not set after login")
+		}
+
+		t.Run("session_expiry", func(t *testing.T) {
+			// Manually expire the session
+			as.ExpiresAt = time.Now().Add(-1 * time.Second)
+
+			// Try to access a protected resource (e.g., HandleIndex)
+			req := webtest.NewRequest("GET", "/",
+				webtest.RequestWithSessionValues(map[string]any{authSessSessionKey: as}),
+			)
+			rw := webtest.NewResponse()
+
+			// HandleIndex checks UserIDFromContext
+			if err := auth.HandleIndex(req.RawRequest().Context(), rw, req); err == nil {
+				t.Error("expected error due to expired session, got nil")
+			} else {
+				// The error message depends on implementation, but likely "user not logged in"
+				if !strings.Contains(err.Error(), "user not logged in") {
+					t.Errorf("expected 'user not logged in' error, got: %v", err)
+				}
+			}
+		})
 	})
 }
 

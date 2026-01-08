@@ -11,9 +11,9 @@ import (
 	"github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"lds.li/oauth2ext/oauth2as"
+	"lds.li/passidp/internal/storage"
 	"lds.li/tinkrotate"
 	tinkrotatev1 "lds.li/tinkrotate/proto/tinkrotate/v1"
-	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 type Keyset struct {

@@ -5,8 +5,8 @@ import (
 
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
+	"lds.li/passidp/internal/oidcsvr"
 	"lds.li/web"
-	"lds.li/webauthn-oidc-idp/internal/oidcsvr"
 )
 
 // MultiClients combines multiple client sources, with static clients taking precedence

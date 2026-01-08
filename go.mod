@@ -1,4 +1,4 @@
-module lds.li/webauthn-oidc-idp
+module lds.li/passidp
 
 go 1.25
 

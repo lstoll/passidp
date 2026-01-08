@@ -15,9 +15,9 @@ import (
 	"github.com/google/uuid"
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
+	"lds.li/passidp/internal/auth"
+	"lds.li/passidp/internal/storage"
 	"lds.li/web"
-	"lds.li/webauthn-oidc-idp/internal/auth"
-	"lds.li/webauthn-oidc-idp/internal/storage"
 )
 
 // DynamicClient represents an retrieved dynamic client for the oidcsvr handler

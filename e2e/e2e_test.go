@@ -26,10 +26,10 @@ import (
 	clitoken "lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/oidc"
 	"lds.li/oauth2ext/provider"
-	"lds.li/webauthn-oidc-idp/internal/admincli"
-	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/idp"
-	"lds.li/webauthn-oidc-idp/internal/storage"
+	"lds.li/passidp/internal/admincli"
+	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/idp"
+	"lds.li/passidp/internal/storage"
 )
 
 // browserStepTimeout returns a duration to timeout browser operations. It defaults

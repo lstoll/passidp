@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"lds.li/webauthn-oidc-idp/internal/config"
+	"lds.li/passidp/internal/config"
 )
 
 func TestMultiClients_GetClient(t *testing.T) {

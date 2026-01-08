@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	"lds.li/webauthn-oidc-idp/internal/config"
+	"lds.li/passidp/internal/config"
 )
 
 type ConfirmCredentialCmd struct {

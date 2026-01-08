@@ -7,7 +7,7 @@ import (
 	"os"
 
 	_ "github.com/mattn/go-sqlite3"
-	"lds.li/webauthn-oidc-idp/db"
+	"lds.li/passidp/db"
 )
 
 func main() {

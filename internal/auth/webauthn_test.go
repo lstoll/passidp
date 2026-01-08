@@ -21,12 +21,12 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
+	dbpkg "lds.li/passidp/db"
+	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/storage"
+	"lds.li/passidp/internal/webcommon"
 	"lds.li/web/session"
 	"lds.li/web/webtest"
-	dbpkg "lds.li/webauthn-oidc-idp/db"
-	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/storage"
-	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
 func TestWebauthnAuth(t *testing.T) {

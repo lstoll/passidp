@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"lds.li/oauth2ext/oidcclientreg"
-	"lds.li/webauthn-oidc-idp/internal/storage"
+	"lds.li/passidp/internal/storage"
 )
 
 // setupTestDB creates a temporary BoltDB database for testing

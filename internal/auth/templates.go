@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"html/template"
 
+	"lds.li/passidp/internal/webcommon"
 	"lds.li/web"
 	"lds.li/web/templateutil"
-	"lds.li/webauthn-oidc-idp/internal/webcommon"
 )
 
 //go:embed templates/*

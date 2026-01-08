@@ -10,7 +10,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"lds.li/webauthn-oidc-idp/internal/config"
+	"lds.li/passidp/internal/config"
 )
 
 type ListCredentialsCmd struct {

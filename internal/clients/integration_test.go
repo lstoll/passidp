@@ -3,7 +3,7 @@ package clients
 import (
 	"testing"
 
-	"lds.li/webauthn-oidc-idp/internal/config"
+	"lds.li/passidp/internal/config"
 )
 
 func TestMultiClientsIntegration(t *testing.T) {

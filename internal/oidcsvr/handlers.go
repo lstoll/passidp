@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tink-crypto/tink-go/v2/jwt"
 	"lds.li/oauth2ext/oauth2as"
-	"lds.li/webauthn-oidc-idp/internal/config"
+	"lds.li/passidp/internal/config"
 )
 
 // Client represents the client information that is used for our custom token

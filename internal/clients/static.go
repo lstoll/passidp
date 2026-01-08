@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"lds.li/oauth2ext/oauth2as"
-	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/oidcsvr"
+	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oidcsvr"
 )
 
 // StaticClients implements the oauth2as.ClientSource against a static list of clients.

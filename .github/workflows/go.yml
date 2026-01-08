@@ -39,7 +39,7 @@ jobs:
       with:
         # list of Docker images to use as base name for tags
         images: |
-          ghcr.io/lstoll/webauthn-oidc-idp
+          ghcr.io/lstoll/passidp
         # generate Docker tags based on the following events/attributes
         tags: |
           type=ref,event=branch

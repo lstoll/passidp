@@ -10,9 +10,9 @@ import (
 	"os"
 
 	"github.com/go-webauthn/webauthn/webauthn"
-	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/queries"
-	"lds.li/webauthn-oidc-idp/internal/storage"
+	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/queries"
+	"lds.li/passidp/internal/storage"
 )
 
 func isMigrationRequired(ctx context.Context, cfg *config.Config) bool {

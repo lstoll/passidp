@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oauth2as/discovery"
+	"lds.li/passidp/internal/auth"
+	"lds.li/passidp/internal/config"
 	"lds.li/web"
 	"lds.li/web/httperror"
-	"lds.li/webauthn-oidc-idp/internal/auth"
-	"lds.li/webauthn-oidc-idp/internal/config"
 )
 
 func init() {

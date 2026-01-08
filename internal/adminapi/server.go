@@ -15,8 +15,8 @@ import (
 	"crawshaw.dev/jsonfile"
 	"github.com/google/uuid"
 	"github.com/oklog/run"
-	"lds.li/webauthn-oidc-idp/internal/config"
-	"lds.li/webauthn-oidc-idp/internal/storage"
+	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/storage"
 )
 
 // Server provides an admin API over a Unix socket.

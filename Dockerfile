@@ -8,7 +8,7 @@ RUN go mod download && \
 
 COPY . .
 
-RUN go install ./cmd/webauthn-oidc-idp
+RUN go install ./cmd/passidp
 
 FROM debian:bookworm
 
@@ -17,6 +17,6 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y ca-certificates sqlite3 procps
 
-COPY --from=build /go/bin/webauthn-oidc-idp /usr/bin/
+COPY --from=build /go/bin/passidp /usr/bin/
 
-CMD ["/usr/bin/webauthn-oidc-idp"]
+CMD ["/usr/bin/passidp"]

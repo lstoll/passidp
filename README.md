@@ -1,4 +1,4 @@
-# WebAuthn OIDC Identity Provider
+# WebAuthn/Passkey OIDC Identity Provider
 
 **Note:** This is experimental software. It is probably not stable nor secure. Don't use it in production!
 
@@ -23,7 +23,7 @@ Create a configuration file (e.g., `etc/config.hujson`) based on the example:
 On the server host:
 
 ```bash
-go run ./cmd/webauthn-oidc-idp \
+go run ./cmd/passidp \
   --config=etc/dev-config.hujson \
   --db-path=data/idp.db \
   serve \
@@ -63,7 +63,7 @@ This is a two-step process to ensure security:
 On the server host:
 
 ```bash
-go run ./cmd/webauthn-oidc-idp \
+go run ./cmd/passidp \
   --config=etc/dev-config.hujson \
   add-credential \
   --socket-path=data/admin.sock \
@@ -89,7 +89,7 @@ Enroll at: https://localhost:8085/registration?enrollment_token=987fcdeb-51a2-43
 On the server host, use the enrollment ID and confirmation key from Step 2:
 
 ```bash
-go run ./cmd/webauthn-oidc-idp \
+go run ./cmd/passidp \
   --config=etc/dev-config.hujson \
   confirm-credential \
   --socket-path=data/admin.sock \
@@ -105,7 +105,7 @@ This activates the credential and makes it available for authentication.
 On the server host:
 
 ```bash
-webauthn-oidc-idp \
+passidp \
   --config=etc/config.hujson \
   list-credentials
 ```
@@ -121,7 +121,7 @@ ID                                      Name            User ID                 
 On the server host:
 
 ```bash
-webauthn-oidc-idp \
+passidp \
   --config=etc/config.hujson \
   delete-credential \
   --credential-id=123e4567-e89b-12d3-a456-426614174000
@@ -134,3 +134,5 @@ webauthn-oidc-idp \
 ```bash
 TEST_E2E=true go test -v ./e2e -count=1 -run TestE2E
 ```
+
+### Get a token

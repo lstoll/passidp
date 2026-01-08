@@ -23,6 +23,10 @@ type Config struct {
 	Clients []Client `json:"clients,omitempty"`
 	// Users is a list of users for this issuer.
 	Users Users `json:"users,omitempty"`
+	// SessionDuration is the duration a session is valid for. Defaults to 1h.
+	SessionDuration string `json:"session_duration,omitempty"`
+	// ParsedSessionDuration is the parsed session duration.
+	ParsedSessionDuration time.Duration `json:"-"`
 }
 
 // ParseConfig parses the config from the given file, expanding environment
@@ -49,11 +53,22 @@ func ParseConfig(file []byte) (*Config, error) {
 }
 
 func (c *Config) SetDefaults() error {
+	if c.SessionDuration == "" {
+		c.SessionDuration = "1h"
+	}
 	return nil
 }
 
 func (c *Config) Validate() error {
 	var validErr error
+
+	if c.SessionDuration != "" {
+		d, err := time.ParseDuration(c.SessionDuration)
+		if err != nil {
+			validErr = errors.Join(validErr, fmt.Errorf("invalid session duration: %w", err))
+		}
+		c.ParsedSessionDuration = d
+	}
 
 	if c.Issuer == "" {
 		validErr = errors.Join(validErr, fmt.Errorf("issuer is required"))

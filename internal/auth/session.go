@@ -17,6 +17,7 @@ const (
 // authSess is the session data for authentication
 type authSess struct {
 	LoggedinUserID uuid.NullUUID
+	ExpiresAt      time.Time
 	Flows          map[string]authSessFlow
 }
 
@@ -37,6 +38,9 @@ func UserIDFromContext(ctx context.Context) (*uuid.UUID, bool) {
 		return nil, false
 	}
 	if !as.LoggedinUserID.Valid {
+		return nil, false
+	}
+	if time.Now().After(as.ExpiresAt) {
 		return nil, false
 	}
 	return &as.LoggedinUserID.UUID, as.LoggedinUserID.Valid

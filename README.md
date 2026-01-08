@@ -23,8 +23,8 @@ Create a configuration file (e.g., `etc/config.hujson`) based on the example:
 On the server host:
 
 ```bash
-webauthn-oidc-idp \
-  --config=etc/config.hujson \
+go run ./cmd/webauthn-oidc-idp \
+  --config=etc/dev-config.hujson \
   --db-path=data/idp.db \
   serve \
   --cert-file=dev-cert.pem \
@@ -63,9 +63,10 @@ This is a two-step process to ensure security:
 On the server host:
 
 ```bash
-webauthn-oidc-idp \
-  --config=etc/config.hujson \
+go run ./cmd/webauthn-oidc-idp \
+  --config=etc/dev-config.hujson \
   add-credential \
+  --socket-path=data/admin.sock \
   --user-id=da5b51ac-0efd-4631-8790-9f02d516527c
 ```
 
@@ -88,9 +89,10 @@ Enroll at: https://localhost:8085/registration?enrollment_token=987fcdeb-51a2-43
 On the server host, use the enrollment ID and confirmation key from Step 2:
 
 ```bash
-webauthn-oidc-idp \
-  --config=etc/config.hujson \
+go run ./cmd/webauthn-oidc-idp \
+  --config=etc/dev-config.hujson \
   confirm-credential \
+  --socket-path=data/admin.sock \
   --user-id=da5b51ac-0efd-4631-8790-9f02d516527c \
   --enrollment-id=123e4567-e89b-12d3-a456-426614174000 \
   --confirmation-key=987fcdeb-51a2-43f1-9b8c-123456789abc

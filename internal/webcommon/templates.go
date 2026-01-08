@@ -14,9 +14,12 @@ var templates embed.FS
 
 // LayoutData holds the data passed to templates
 type LayoutData struct {
-	Title        string
-	UserLoggedIn bool
-	Username     string
+	Title          string
+	UserLoggedIn   bool
+	Username       string
+	UserFullName   string
+	UserEmail      string
+	SuccessMessage string
 	// Add more fields as needed for different pages
 }
 

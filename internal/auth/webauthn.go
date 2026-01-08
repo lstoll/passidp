@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"crawshaw.dev/jsonfile"
@@ -38,6 +40,7 @@ func SkipAuthn(r *http.Request) *http.Request {
 type Authenticator struct {
 	Webauthn  *webauthn.WebAuthn
 	CredStore *jsonfile.JSONFile[storage.CredentialStore]
+	State     *storage.State
 	Config    *config.Config
 }
 
@@ -46,6 +49,10 @@ func (a *Authenticator) AddHandlers(r *web.Server) {
 	r.Handle("GET /login", web.BrowserHandlerFunc(a.HandleLoginPage), SkipAuthn)
 	r.Handle("GET /logout", web.BrowserHandlerFunc(a.Logout), SkipAuthn)
 	r.Handle("POST /finishWebauthnLogin", web.BrowserHandlerFunc(a.DoLogin), SkipAuthn)
+
+	// Grant management API
+	r.Handle("GET /api/grants", a.Middleware(web.BrowserHandlerFunc(a.HandleListGrants)))
+	r.Handle("DELETE /api/grants/", a.Middleware(web.BrowserHandlerFunc(a.HandleRevokeGrant)))
 }
 
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
@@ -74,13 +81,20 @@ func (a *Authenticator) HandleIndex(ctx context.Context, w web.ResponseWriter, r
 		return httperror.BadRequestErrf("user not logged in")
 	}
 
+	user, err := a.Config.Users.GetUser(*userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
 	// Example: User not logged in
 	return w.WriteResponse(r, &web.TemplateResponse{
 		Name: "index.tmpl.html",
 		Data: webcommon.LayoutData{
 			Title:        "Login - IDP",
 			UserLoggedIn: ok,
-			Username:     userID.String(),
+			Username:     user.Email,
+			UserFullName: user.FullName,
+			UserEmail:    user.Email,
 		},
 		Templates: templates,
 	})
@@ -237,4 +251,85 @@ func (a *Authenticator) Logout(ctx context.Context, w web.ResponseWriter, r *web
 	return w.WriteResponse(r, &web.RedirectResponse{
 		URL: "/",
 	})
+}
+
+type grantInfo struct {
+	ID        string   `json:"id"`
+	ClientID  string   `json:"client_id"`
+	Scopes    []string `json:"scopes"`
+	GrantedAt string   `json:"granted_at"`
+	ExpiresAt string   `json:"expires_at"`
+}
+
+type listGrantsResponse struct {
+	Grants []grantInfo `json:"grants"`
+}
+
+func (a *Authenticator) HandleListGrants(ctx context.Context, w web.ResponseWriter, r *web.Request) error {
+	userID, ok := UserIDFromContext(ctx)
+	if !ok {
+		return httperror.BadRequestErrf("user not logged in")
+	}
+
+	grants, err := a.State.ListActiveGrantsForUser(ctx, userID.String())
+	if err != nil {
+		return fmt.Errorf("list active grants: %w", err)
+	}
+
+	var resp listGrantsResponse
+	for _, g := range grants {
+		resp.Grants = append(resp.Grants, grantInfo{
+			ID:        g.ID.String(),
+			ClientID:  g.ClientID,
+			Scopes:    g.GrantedScopes,
+			GrantedAt: g.GrantedAt.Format(time.RFC3339),
+			ExpiresAt: g.ExpiresAt.Format(time.RFC3339),
+		})
+	}
+
+	// Sort by most recent first
+	sort.Slice(resp.Grants, func(i, j int) bool {
+		return resp.Grants[i].GrantedAt > resp.Grants[j].GrantedAt
+	})
+
+	return w.WriteResponse(r, &web.JSONResponse{
+		Data: resp,
+	})
+}
+
+func (a *Authenticator) HandleRevokeGrant(ctx context.Context, w web.ResponseWriter, r *web.Request) error {
+	userID, ok := UserIDFromContext(ctx)
+	if !ok {
+		return httperror.BadRequestErrf("user not logged in")
+	}
+
+	path := r.URL().Path
+	prefix := "/api/grants/"
+	grantIDStr, ok := strings.CutPrefix(path, prefix)
+	if !ok || grantIDStr == "" {
+		return httperror.BadRequestErrf("grant ID required")
+	}
+
+	grantID, err := uuid.Parse(grantIDStr)
+	if err != nil {
+		return httperror.BadRequestErrf("invalid grant ID: %w", err)
+	}
+
+	grant, err := a.State.GetGrant(ctx, grantID)
+	if err != nil {
+		return fmt.Errorf("get grant: %w", err)
+	}
+	if grant == nil {
+		return httperror.NotFoundErrf("grant not found")
+	}
+	if grant.UserID != userID.String() {
+		return httperror.NotFoundErrf("grant not found")
+	}
+
+	if err := a.State.RevokeGrant(ctx, grantID); err != nil {
+		return fmt.Errorf("revoke grant: %w", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

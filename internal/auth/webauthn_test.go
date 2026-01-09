@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/descope/virtualwebauthn"
-	_ "github.com/mattn/go-sqlite3"
 
 	"encoding/base64"
 
@@ -21,7 +19,6 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
-	dbpkg "lds.li/passidp/db"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/storage"
 	"lds.li/passidp/internal/webcommon"
@@ -30,18 +27,6 @@ import (
 )
 
 func TestWebauthnAuth(t *testing.T) {
-	sqldb, err := sql.Open("sqlite3", "file:test.db?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open in-memory database: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sqldb.Close()
-	})
-
-	if err := dbpkg.Migrate(t.Context(), sqldb); err != nil {
-		t.Fatalf("run migrations: %v", err)
-	}
-
 	wn, err := webauthn.New(&webauthn.Config{
 		RPID:          "test",
 		RPDisplayName: "Test",

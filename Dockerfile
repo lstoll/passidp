@@ -1,21 +1,20 @@
-FROM golang:1.25-bookworm AS build
+FROM golang:1.25-trixie AS build
 
 WORKDIR /src
 
-COPY go.mod go.sum compilestub.go ./
-RUN go mod download && \
-    go build -tags compilestub -o /dev/null compilestub.go # pre-compile sqlite3 module
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
 
-RUN go install ./cmd/passidp
+RUN CGO_ENABLED=0 go install ./cmd/passidp
 
-FROM debian:bookworm
+FROM debian:trixie
 
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y ca-certificates sqlite3 procps
+    apt-get install -y ca-certificates procps
 
 COPY --from=build /go/bin/passidp /usr/bin/
 

@@ -24,12 +24,7 @@ const (
 
 // KeysetStore implements tinkrotate.ManagedStore using BoltDB
 type KeysetStore struct {
-	db *bolt.DB
-}
-
-// NewKeysetStore creates a new KeysetStore from a State instance
-func NewKeysetStore(state *State) *KeysetStore {
-	return &KeysetStore{db: state.db}
+	dbAccessor *dbAccessor
 }
 
 // storedKeyset represents a keyset stored in BoltDB
@@ -60,9 +55,12 @@ func (k *KeysetStore) GetPublicHandle(ctx context.Context, keysetName string) (*
 
 // ReadKeysetAndMetadata reads a keyset and its metadata from the store.
 func (k *KeysetStore) ReadKeysetAndMetadata(ctx context.Context, keysetName string) (*tinkrotate.ReadResult, error) {
+	db, release := k.dbAccessor.db()
+	defer release()
+
 	var result *tinkrotate.ReadResult
 	var notFound bool
-	err := k.db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketKeysets))
 		if bucket == nil {
 			notFound = true
@@ -126,7 +124,10 @@ func (k *KeysetStore) WriteKeysetAndMetadata(ctx context.Context, keysetName str
 		return fmt.Errorf("write cleartext keyset handle for %q: %w", keysetName, err)
 	}
 
-	return k.db.Update(func(tx *bolt.Tx) error {
+	db, release := k.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketKeysets))
 		if bucket == nil {
 			return fmt.Errorf("keysets bucket does not exist")
@@ -185,7 +186,10 @@ func (k *KeysetStore) WriteKeysetAndMetadata(ctx context.Context, keysetName str
 
 // ForEachKeyset calls fn for each keyset name in the store.
 func (k *KeysetStore) ForEachKeyset(ctx context.Context, fn func(keysetName string) error) error {
-	return k.db.View(func(tx *bolt.Tx) error {
+	db, release := k.dbAccessor.db()
+	defer release()
+
+	return db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketKeysets))
 		if bucket == nil {
 			return nil // No bucket means no keysets

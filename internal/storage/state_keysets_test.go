@@ -19,7 +19,7 @@ func TestKeysetStore(t *testing.T) {
 	defer state.db.Close()
 
 	// Create a KeysetStore
-	store := NewKeysetStore(state)
+	store := state.KeysetStore()
 
 	// Create a test keyset handle
 	handle, err := keyset.NewHandle(jwt.RS256_2048_F4_Key_Template())
@@ -181,7 +181,7 @@ func TestKeysetStoreOptimisticLocking(t *testing.T) {
 	defer state.db.Close()
 
 	// Create a KeysetStore
-	store := NewKeysetStore(state)
+	store := state.KeysetStore()
 
 	// Create a test keyset handle
 	handle, err := keyset.NewHandle(jwt.RS256_2048_F4_Key_Template())

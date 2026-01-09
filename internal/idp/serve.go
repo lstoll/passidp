@@ -55,6 +55,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, adminSocket a
 	}
 
 	g.Add(state.GarbageCollector(1 * time.Hour))
+	g.Add(state.Compactor(12 * time.Hour))
 
 	// Create multi-clients that combines both
 	multiClients := clients.NewMultiClients(&clients.StaticClients{
@@ -140,7 +141,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, adminSocket a
 
 // NewIDP creates a new IDP server for the given params.
 func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], state *storage.State, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
-	oidcHandles, err := initKeysets(ctx, state)
+	oidcHandles, err := initKeysets(ctx, state.KeysetStore())
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
 	}

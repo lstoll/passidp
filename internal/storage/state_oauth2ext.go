@@ -24,7 +24,7 @@ const (
 
 // OAuth2State implements oauth2as.Storage using BoltDB
 type OAuth2State struct {
-	db *bolt.DB
+	dbAccessor *dbAccessor
 }
 
 var _ oauth2as.Storage = (*OAuth2State)(nil)
@@ -81,7 +81,10 @@ func (g *storedGrantJSON) toStoredGrant() *oauth2as.StoredGrant {
 
 // CreateGrant creates a new grant
 func (o *OAuth2State) CreateGrant(ctx context.Context, grant *oauth2as.StoredGrant) error {
-	return o.db.Update(func(tx *bolt.Tx) error {
+	db, release := o.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		grantsBucket := tx.Bucket([]byte(bucketGrants))
 		if grantsBucket == nil {
 			return fmt.Errorf("grants bucket does not exist")
@@ -146,7 +149,10 @@ func (o *OAuth2State) CreateGrant(ctx context.Context, grant *oauth2as.StoredGra
 
 // UpdateGrant updates an existing grant
 func (o *OAuth2State) UpdateGrant(ctx context.Context, grant *oauth2as.StoredGrant) error {
-	return o.db.Update(func(tx *bolt.Tx) error {
+	db, release := o.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		grantsBucket := tx.Bucket([]byte(bucketGrants))
 		if grantsBucket == nil {
 			return fmt.Errorf("grants bucket does not exist")
@@ -236,7 +242,10 @@ func (o *OAuth2State) UpdateGrant(ctx context.Context, grant *oauth2as.StoredGra
 
 // ExpireGrant expires a grant by setting its expiry to now
 func (o *OAuth2State) ExpireGrant(ctx context.Context, id uuid.UUID) error {
-	return o.db.Update(func(tx *bolt.Tx) error {
+	db, release := o.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		grantsBucket := tx.Bucket([]byte(bucketGrants))
 		if grantsBucket == nil {
 			return nil // Grant doesn't exist, nothing to expire
@@ -273,8 +282,12 @@ func (o *OAuth2State) ExpireGrant(ctx context.Context, id uuid.UUID) error {
 
 // GetGrant retrieves a grant by ID
 func (o *OAuth2State) GetGrant(ctx context.Context, id uuid.UUID) (*oauth2as.StoredGrant, error) {
+	db, release := o.dbAccessor.db()
+	defer release()
+
 	var grant *oauth2as.StoredGrant
-	err := o.db.View(func(tx *bolt.Tx) error {
+
+	err := db.View(func(tx *bolt.Tx) error {
 		grantsBucket := tx.Bucket([]byte(bucketGrants))
 		if grantsBucket == nil {
 			return nil // No grants bucket means no grant
@@ -310,8 +323,12 @@ func (o *OAuth2State) GetGrant(ctx context.Context, id uuid.UUID) (*oauth2as.Sto
 
 // GetGrantByAuthCode retrieves a grant by authorization code
 func (o *OAuth2State) GetGrantByAuthCode(ctx context.Context, authCode []byte) (*oauth2as.StoredGrant, error) {
+	db, release := o.dbAccessor.db()
+	defer release()
+
 	var grant *oauth2as.StoredGrant
-	err := o.db.View(func(tx *bolt.Tx) error {
+
+	err := db.View(func(tx *bolt.Tx) error {
 		authCodesBucket := tx.Bucket([]byte(bucketAuthCodes))
 		if authCodesBucket == nil {
 			return nil // No auth codes bucket means no grant
@@ -378,8 +395,12 @@ func (o *OAuth2State) GetGrantByAuthCode(ctx context.Context, authCode []byte) (
 
 // GetGrantByRefreshToken retrieves a grant by refresh token
 func (o *OAuth2State) GetGrantByRefreshToken(ctx context.Context, refreshToken []byte) (*oauth2as.StoredGrant, error) {
+	db, release := o.dbAccessor.db()
+	defer release()
+
 	var grant *oauth2as.StoredGrant
-	err := o.db.View(func(tx *bolt.Tx) error {
+
+	err := db.View(func(tx *bolt.Tx) error {
 		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
 		if refreshTokensBucket == nil {
 			return nil // No refresh tokens bucket means no grant
@@ -446,8 +467,12 @@ func (o *OAuth2State) GetGrantByRefreshToken(ctx context.Context, refreshToken [
 
 // ListActiveGrantsForUser retrieves all active grants for a specific user
 func (o *OAuth2State) ListActiveGrantsForUser(ctx context.Context, userID string) ([]*oauth2as.StoredGrant, error) {
+	db, release := o.dbAccessor.db()
+	defer release()
+
 	var grants []*oauth2as.StoredGrant
-	err := o.db.View(func(tx *bolt.Tx) error {
+
+	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketGrants))
 		if b == nil {
 			return nil
@@ -481,7 +506,10 @@ func (o *OAuth2State) ListActiveGrantsForUser(ctx context.Context, userID string
 
 // RevokeGrant revokes a grant by removing its refresh token
 func (o *OAuth2State) RevokeGrant(ctx context.Context, id uuid.UUID) error {
-	return o.db.Update(func(tx *bolt.Tx) error {
+	db, release := o.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		grantsBucket := tx.Bucket([]byte(bucketGrants))
 		if grantsBucket == nil {
 			return nil
@@ -533,7 +561,10 @@ func (o *OAuth2State) GarbageCollect() (authCodesDeleted, refreshTokensDeleted, 
 	now := time.Now()
 	grantCutoff := now.Add(-oauth2GrantRetentionPeriod)
 
-	err = o.db.Update(func(tx *bolt.Tx) error {
+	db, release := o.dbAccessor.db()
+	defer release()
+
+	err = db.Update(func(tx *bolt.Tx) error {
 		authCodesBucket := tx.Bucket([]byte(bucketAuthCodes))
 		if authCodesBucket != nil {
 			c := authCodesBucket.Cursor()

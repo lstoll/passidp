@@ -3,6 +3,8 @@ package storage
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -20,18 +22,35 @@ var expectedBuckets = map[string]bool{
 	bucketPendingEnrollments:     true,
 }
 
+const dbMode = 0o600
+
+// dbAccessor wraps the state and is what we pass to the sub-stores, to ensure
+// that locking is handled correctly.
+type dbAccessor struct {
+	st *State
+}
+
+func (d *dbAccessor) db() (_ *bolt.DB, release func()) {
+	d.st.dbMu.RLock()
+	return d.st.db, func() {
+		d.st.dbMu.RUnlock()
+	}
+}
+
 // State represents the on-disk runtime state for the IDP.
 type State struct {
-	db *bolt.DB
+	db   *bolt.DB
+	dbMu sync.RWMutex
 
 	pendingEnrollments *PendingEnrollments
 	sessionKV          *SessionKV
 	oauth2State        *OAuth2State
 	dynamicClientStore *DynamicClientStore
+	keysetStore        *KeysetStore
 }
 
 func NewState(path string) (*State, error) {
-	db, err := bolt.Open(path, 0o600, nil)
+	db, err := bolt.Open(path, dbMode, nil)
 	if err != nil {
 		return nil, fmt.Errorf("open bolt db: %w", err)
 	}
@@ -75,12 +94,14 @@ func NewState(path string) (*State, error) {
 	}
 
 	s := &State{
-		db:                 db,
-		pendingEnrollments: &PendingEnrollments{db: db},
-		sessionKV:          &SessionKV{db: db},
-		oauth2State:        &OAuth2State{db: db},
-		dynamicClientStore: &DynamicClientStore{db: db},
+		db: db,
 	}
+
+	s.pendingEnrollments = &PendingEnrollments{dbAccessor: &dbAccessor{st: s}}
+	s.sessionKV = &SessionKV{dbAccessor: &dbAccessor{st: s}}
+	s.oauth2State = &OAuth2State{dbAccessor: &dbAccessor{st: s}}
+	s.dynamicClientStore = &DynamicClientStore{dbAccessor: &dbAccessor{st: s}}
+	s.keysetStore = &KeysetStore{dbAccessor: &dbAccessor{st: s}}
 
 	return s, nil
 }
@@ -107,6 +128,11 @@ func (s *State) OAuth2State() *OAuth2State {
 // DynamicClientStore returns a DynamicClientStore instance for managing dynamic clients
 func (s *State) DynamicClientStore() *DynamicClientStore {
 	return s.dynamicClientStore
+}
+
+// KeysetStore returns a KeysetStore instance for managing keysets
+func (s *State) KeysetStore() *KeysetStore {
+	return s.keysetStore
 }
 
 func (s *State) GarbageCollector(interval time.Duration) (execute func() error, interrupt func(error)) {
@@ -167,4 +193,116 @@ func (s *State) runGC() {
 	}
 
 	log.Info("finished garbage collection")
+}
+
+func (s *State) Compactor(interval time.Duration) (execute func() error, interrupt func(error)) {
+	log := slog.With("component", "compactor")
+
+	stopCh := make(chan struct{})
+
+	return func() error {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					log.Info("starting compaction run")
+					if err := s.runCompactor(log); err != nil {
+						log.Error("compaction failed", slog.String("error", err.Error()))
+					}
+				case <-stopCh:
+					return nil
+				}
+			}
+
+		}, func(error) {
+			close(stopCh)
+		}
+}
+
+func (s *State) runCompactor(log *slog.Logger) error {
+	start := time.Now()
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+	log.Info("lock acquired, compacting", "lock_acquisition_time", time.Since(start))
+
+	path := s.db.Path()
+	compactPath := path + ".compact"
+
+	// Get original file size before compaction.
+	sizeBefore, err := getFileSize(path)
+	if err != nil {
+		return fmt.Errorf("failed to get DB file size: %w", err)
+	}
+
+	log.Info("compacting BoltDB", "input", path, "output", compactPath)
+
+	newDB, err := bolt.Open(compactPath, dbMode, nil)
+	if err != nil {
+		return fmt.Errorf("failed to open new DB at %s: %w", compactPath, err)
+	}
+
+	if err := bolt.Compact(newDB, s.db, 10000); err != nil {
+		newDB.Close()
+		os.Remove(compactPath)
+		return fmt.Errorf("failed to compact DB: %w", err)
+	}
+
+	if err := newDB.Close(); err != nil {
+		os.Remove(compactPath)
+		return fmt.Errorf("failed to close new DB: %w", err)
+	}
+
+	sizeAfter, err := getFileSize(compactPath)
+	if err != nil {
+		os.Remove(compactPath)
+		return fmt.Errorf("failed to get compacted DB file size: %w", err)
+	}
+
+	if err := s.db.Close(); err != nil {
+		os.Remove(compactPath)
+		return fmt.Errorf("failed to close existing DB: %w", err)
+	}
+
+	if err := os.Rename(compactPath, path); err != nil {
+		return fmt.Errorf("failed to replace DB with compacted version: %w", err)
+	}
+
+	db, err := bolt.Open(path, dbMode, nil)
+	if err != nil {
+		return fmt.Errorf("failed to open compacted DB: %w", err)
+	}
+
+	s.db = db
+	log.Info("compaction complete", "path", path, "size_before", formatBytes(sizeBefore), "size_after", formatBytes(sizeAfter))
+	return nil
+}
+
+// getFileSize returns the size in bytes of the file at the given path.
+func getFileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// formatBytes formats a byte count into a human-readable string using binary
+// units (KiB, MiB, GiB, etc.).
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	if exp >= len(units) {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	return fmt.Sprintf("%.2f %s", float64(bytes)/float64(div), units[exp])
 }

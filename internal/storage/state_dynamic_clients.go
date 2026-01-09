@@ -34,14 +34,17 @@ type DynamicClient struct {
 
 // DynamicClientStore implements dynamic client storage using BoltDB
 type DynamicClientStore struct {
-	db *bolt.DB
+	dbAccessor *dbAccessor
 }
 
 // GetDynamicClient retrieves an active, non-expired dynamic client by ID
 func (s *DynamicClientStore) GetDynamicClient(ctx context.Context, id string) (*DynamicClient, error) {
+	db, release := s.dbAccessor.db()
+	defer release()
+
 	var client *DynamicClient
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketDynamicClients))
 		if bucket == nil {
 			return ErrDynamicClientNotFound
@@ -75,7 +78,10 @@ func (s *DynamicClientStore) GetDynamicClient(ctx context.Context, id string) (*
 
 // CreateDynamicClient creates a new dynamic client
 func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, secretHash, registrationBlob string, expiresAt time.Time) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	db, release := s.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		clientsBucket := tx.Bucket([]byte(bucketDynamicClients))
 		if clientsBucket == nil {
 			return fmt.Errorf("dynamic_clients bucket does not exist")
@@ -126,7 +132,10 @@ func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, secret
 
 // DeactivateDynamicClient deactivates a dynamic client
 func (s *DynamicClientStore) DeactivateDynamicClient(ctx context.Context, id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	db, release := s.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		clientsBucket := tx.Bucket([]byte(bucketDynamicClients))
 		if clientsBucket == nil {
 			return ErrDynamicClientNotFound
@@ -163,9 +172,12 @@ func (s *DynamicClientStore) DeactivateDynamicClient(ctx context.Context, id str
 // ListActiveDynamicClients returns all active, non-expired dynamic clients
 // sorted by creation date (most recent first)
 func (s *DynamicClientStore) ListActiveDynamicClients(ctx context.Context) ([]*DynamicClient, error) {
+	db, release := s.dbAccessor.db()
+	defer release()
+
 	var clients []*DynamicClient
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketDynamicClients))
 		if bucket == nil {
 			return nil // No bucket means no clients
@@ -209,9 +221,12 @@ func (s *DynamicClientStore) ListActiveDynamicClients(ctx context.Context) ([]*D
 // GetDynamicClientBySecretHash retrieves an active, non-expired dynamic client
 // by secret hash
 func (s *DynamicClientStore) GetDynamicClientBySecretHash(ctx context.Context, secretHash string) (*DynamicClient, error) {
+	db, release := s.dbAccessor.db()
+	defer release()
+
 	var client *DynamicClient
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		secretBucket := tx.Bucket([]byte(bucketDynamicClientsBySecret))
 		if secretBucket == nil {
 			return ErrDynamicClientNotFound
@@ -258,8 +273,12 @@ func (s *DynamicClientStore) GetDynamicClientBySecretHash(ctx context.Context, s
 // CleanupExpiredDynamicClients removes expired or inactive dynamic clients.
 // Returns the number of clients deleted.
 func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
+	db, release := s.dbAccessor.db()
+	defer release()
+
 	var deletedCount int
-	err := s.db.Update(func(tx *bolt.Tx) error {
+
+	err := db.Update(func(tx *bolt.Tx) error {
 		clientsBucket := tx.Bucket([]byte(bucketDynamicClients))
 		if clientsBucket == nil {
 			return nil // No bucket means nothing to clean

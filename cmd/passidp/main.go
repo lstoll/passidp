@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -10,12 +9,10 @@ import (
 	"strings"
 
 	"github.com/alecthomas/kong"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/prometheus/client_golang/prometheus"
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	promversion "github.com/prometheus/common/version"
 	"golang.org/x/term"
-	dbpkg "lds.li/passidp/db"
 	"lds.li/passidp/internal/admincli"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/idp"
@@ -50,7 +47,6 @@ var rootCmd = struct {
 	Debug bool `env:"DEBUG" help:"Enable debug logging"`
 
 	ConfigFile kong.NamedFileContentFlag `name:"config" required:"" env:"IDP_CONFIG_FILE" help:"Path to the config file."`
-	DBPath     string                    `env:"IDP_DB_PATH" help:"Path to the SQLite database file."`
 
 	Version kong.VersionFlag `help:"Print version information"`
 
@@ -99,48 +95,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var db *sql.DB
-	if rootCmd.DBPath != "" { // set up DB
-		var err error
-		db, err = sql.Open("sqlite3", rootCmd.DBPath+"?_journal=WAL")
-		if err != nil {
-			slog.Error("open database", slog.String("path", rootCmd.DBPath), slog.String("error", err.Error()))
-			os.Exit(1)
-		}
-
-		if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-			slog.Error("enable WAL mode", slog.String("error", err.Error()))
-			os.Exit(1)
-		}
-
-		if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
-			slog.Error("set busy timeout", slog.String("error", err.Error()))
-			os.Exit(1)
-		}
-
-		if err := dbpkg.Migrate(ctx, db); err != nil {
-			slog.Error("run migrations", slog.String("error", err.Error()))
-			os.Exit(1)
-		}
-	}
-
-	// run any data migrations
-
-	if isMigrationRequired(ctx, config) && db == nil {
-		slog.Error("migration required, but no database path provided")
-		os.Exit(1)
-	}
-
-	if err := migrateUserData(ctx, db, config); err != nil {
-		slog.Error("migrate user data", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-
-	if clictx.Selected().Name == "serve" {
-		if err := migrateCredentials(ctx, db, rootCmd.Serve.CredentialStorePath); err != nil {
-			slog.Error("migrate credentials", slog.String("error", err.Error()))
-			os.Exit(1)
-		}
+	if clictx.Selected().Name != "serve" {
+		// TODO - error if admmin sock not set.
 	}
 
 	clictx.BindTo(ctx, (*context.Context)(nil))

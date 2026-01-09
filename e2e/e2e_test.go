@@ -20,7 +20,6 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/oklog/run"
 	"golang.org/x/oauth2"
 	clitoken "lds.li/oauth2ext/clitoken"

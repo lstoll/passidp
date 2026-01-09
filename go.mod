@@ -3,13 +3,13 @@ module lds.li/passidp
 go 1.25
 
 require (
+	crawshaw.dev/jsonfile v0.0.0-20240206193014-699d1dad804e
 	github.com/alecthomas/kong v1.13.0
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.2
 	github.com/descope/virtualwebauthn v1.0.3
 	github.com/go-webauthn/webauthn v0.15.0
 	github.com/google/uuid v1.6.0
-	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/oklog/run v1.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/common v0.67.4
@@ -25,7 +25,6 @@ require (
 )
 
 require (
-	crawshaw.dev/jsonfile v0.0.0-20240206193014-699d1dad804e // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect

@@ -27,6 +27,7 @@ type State struct {
 	pendingEnrollments *PendingEnrollments
 	sessionKV          *SessionKV
 	oauth2State        *OAuth2State
+	dynamicClientStore *DynamicClientStore
 }
 
 func NewState(path string) (*State, error) {
@@ -78,6 +79,7 @@ func NewState(path string) (*State, error) {
 		pendingEnrollments: &PendingEnrollments{db: db},
 		sessionKV:          &SessionKV{db: db},
 		oauth2State:        &OAuth2State{db: db},
+		dynamicClientStore: &DynamicClientStore{db: db},
 	}
 
 	return s, nil
@@ -100,6 +102,11 @@ func (s *State) SessionKV() *SessionKV {
 // OAuth2State returns an OAuth2State instance for managing OAuth2 grants
 func (s *State) OAuth2State() *OAuth2State {
 	return s.oauth2State
+}
+
+// DynamicClientStore returns a DynamicClientStore instance for managing dynamic clients
+func (s *State) DynamicClientStore() *DynamicClientStore {
+	return s.dynamicClientStore
 }
 
 func (s *State) GarbageCollector(interval time.Duration) (execute func() error, interrupt func(error)) {
@@ -151,6 +158,12 @@ func (s *State) runGC() {
 		log.Error("garbage collect sessions", slog.String("error", err.Error()))
 	} else if deleted > 0 {
 		log.Info("garbage collected sessions", slog.Int("deleted", deleted))
+	}
+
+	if deleted, err := s.dynamicClientStore.CleanupExpiredDynamicClients(); err != nil {
+		log.Error("garbage collect dynamic clients", slog.String("error", err.Error()))
+	} else if deleted > 0 {
+		log.Info("garbage collected dynamic clients", slog.Int("deleted", deleted))
 	}
 
 	log.Info("finished garbage collection")

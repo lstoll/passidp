@@ -37,11 +37,6 @@ type DynamicClientStore struct {
 	db *bolt.DB
 }
 
-// NewDynamicClientStore creates a new DynamicClientStore from a State instance
-func NewDynamicClientStore(state *State) *DynamicClientStore {
-	return &DynamicClientStore{db: state.db}
-}
-
 // GetDynamicClient retrieves an active, non-expired dynamic client by ID
 func (s *DynamicClientStore) GetDynamicClient(ctx context.Context, id string) (*DynamicClient, error) {
 	var client *DynamicClient
@@ -260,9 +255,11 @@ func (s *DynamicClientStore) GetDynamicClientBySecretHash(ctx context.Context, s
 	return client, nil
 }
 
-// CleanupExpiredDynamicClients removes expired or inactive dynamic clients
-func (s *DynamicClientStore) CleanupExpiredDynamicClients(ctx context.Context) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+// CleanupExpiredDynamicClients removes expired or inactive dynamic clients.
+// Returns the number of clients deleted.
+func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
+	var deletedCount int
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		clientsBucket := tx.Bucket([]byte(bucketDynamicClients))
 		if clientsBucket == nil {
 			return nil // No bucket means nothing to clean
@@ -310,8 +307,15 @@ func (s *DynamicClientStore) CleanupExpiredDynamicClients(ctx context.Context) e
 					return fmt.Errorf("deleting secret hash index: %w", err)
 				}
 			}
+			deletedCount++
 		}
 
 		return nil
 	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return deletedCount, nil
 }

@@ -28,14 +28,12 @@ func setupTestDB(t *testing.T) (*storage.DynamicClientStore, func()) {
 		t.Fatalf("failed to create state: %v", err)
 	}
 
-	store := storage.NewDynamicClientStore(state)
-
 	cleanup := func() {
 		state.Close()
 		os.Remove(tmpfile.Name())
 	}
 
-	return store, cleanup
+	return state.DynamicClientStore(), cleanup
 }
 
 // createTestDynamicClient creates a dynamic client in the database for testing

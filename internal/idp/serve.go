@@ -59,7 +59,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, adminSocket a
 	// Create multi-clients that combines both
 	multiClients := clients.NewMultiClients(&clients.StaticClients{
 		Clients: config.Clients},
-		&clients.DynamicClients{DB: storage.NewDynamicClientStore(state)},
+		&clients.DynamicClients{DB: state.DynamicClientStore()},
 	)
 
 	idph, err := NewIDP(ctx, &g, config, credStore, state, config.ParsedIssuer, multiClients)

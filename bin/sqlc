@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-exec go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0 "$@"

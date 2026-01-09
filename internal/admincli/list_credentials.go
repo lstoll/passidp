@@ -5,17 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"text/tabwriter"
 
-	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/adminapi"
 )
 
 type ListCredentialsCmd struct {
-	SocketPath string `required:"" env:"IDP_ADMIN_SOCKET_PATH" help:"Path to admin API Unix socket."`
-
 	Output io.Writer `kong:"-"`
 }
 
@@ -32,17 +29,9 @@ type credentialInfo struct {
 	CreatedAt string `json:"created_at"`
 }
 
-func (c *ListCredentialsCmd) Run(ctx context.Context, cfg *config.Config) error {
+func (c *ListCredentialsCmd) Run(ctx context.Context, adminSocket adminapi.SocketPath) error {
 	if c.Output == nil {
 		c.Output = os.Stdout
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", c.SocketPath)
-			},
-		},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/admin/credentials", nil)
@@ -50,7 +39,7 @@ func (c *ListCredentialsCmd) Run(ctx context.Context, cfg *config.Config) error 
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := adminapi.NewClient(adminSocket).Do(req)
 	if err != nil {
 		return fmt.Errorf("call admin API: %w", err)
 	}

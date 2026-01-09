@@ -17,7 +17,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 
-	"github.com/alecthomas/kong"
 	"github.com/chromedp/cdproto/runtime"
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
@@ -26,6 +25,7 @@ import (
 	clitoken "lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/oidc"
 	"lds.li/oauth2ext/provider"
+	"lds.li/passidp/internal/adminapi"
 	"lds.li/passidp/internal/admincli"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/idp"
@@ -94,7 +94,7 @@ func TestE2E(t *testing.T) {
 	/* start an instance of the server */
 	credstorePath := t.TempDir() + "/credential-store.json"
 	statePath := t.TempDir() + "/state.bolt"
-	adminSocketPath := t.TempDir() + "/admin.sock"
+	adminSocketPath := adminapi.SocketPath(t.TempDir() + "/admin.sock")
 
 	port := mustAllocatePort()
 
@@ -142,10 +142,8 @@ func TestE2E(t *testing.T) {
 			KeyFile:             keyPath,
 			CredentialStorePath: credstorePath,
 			StatePath:           statePath,
-			ConfigFile:          kong.NamedFileContentFlag{Filename: "testdata/config.hujson", Contents: cfgb},
-			AdminSocketPath:     adminSocketPath,
 		}
-		serveErr <- idpCmd.Run(serveCtx)
+		serveErr <- idpCmd.Run(serveCtx, config, adminSocketPath)
 	}()
 
 	select {
@@ -207,11 +205,10 @@ func TestE2E(t *testing.T) {
 	testOk := t.Run("Registration", func(t *testing.T) {
 		var enrollBuf bytes.Buffer
 		addCredCmd := &admincli.AddCredentialCmd{
-			UserID:     testUserID,
-			SocketPath: adminSocketPath,
-			Output:     &enrollBuf,
+			UserID: testUserID,
+			Output: &enrollBuf,
 		}
-		if err := addCredCmd.Run(ctx, config); err != nil {
+		if err := addCredCmd.Run(ctx, config, adminSocketPath); err != nil {
 			t.Fatalf("enrolling user: %v", err)
 		}
 
@@ -275,10 +272,9 @@ func TestE2E(t *testing.T) {
 			UserID:          testUserID,
 			EnrollmentID:    enrollmentID,
 			ConfirmationKey: confirmationKey,
-			SocketPath:      adminSocketPath,
 			Output:          &confirmBuf,
 		}
-		if err := confirmCmd.Run(ctx, config); err != nil {
+		if err := confirmCmd.Run(ctx, adminSocketPath); err != nil {
 			t.Fatalf("confirming enrollment: %v", err)
 		}
 

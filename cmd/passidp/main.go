@@ -13,7 +13,9 @@ import (
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	promversion "github.com/prometheus/common/version"
 	"golang.org/x/term"
+	"lds.li/passidp/internal/adminapi"
 	"lds.li/passidp/internal/admincli"
+	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/idp"
 )
 
@@ -46,6 +48,9 @@ var rootCmd = struct {
 	Debug bool `env:"DEBUG" help:"Enable debug logging"`
 
 	Version kong.VersionFlag `help:"Print version information"`
+
+	ConfigFile      kong.NamedFileContentFlag `name:"config" required:"" env:"IDP_CONFIG_FILE" help:"Path to the config file."`
+	AdminSocketPath string                    `env:"IDP_ADMIN_SOCKET_PATH" help:"Path to Unix socket to serve the admin API (optional for serve)."`
 
 	Serve             idp.ServeCmd                  `cmd:"" help:"Serve the IDP server."`
 	AddCredential     admincli.AddCredentialCmd     `cmd:"" help:"Add a credential to a user."`
@@ -85,6 +90,20 @@ func main() {
 		handler = slog.NewJSONHandler(os.Stderr, slogOpts)
 	}
 	slog.SetDefault(slog.New(handler))
+
+	if clictx.Selected().Name != "serve" {
+		if rootCmd.AdminSocketPath == "" {
+			clictx.Fatalf("admin socket path is required")
+		}
+	}
+
+	cfg, err := config.ParseConfig(rootCmd.ConfigFile.Contents)
+	if err != nil {
+		clictx.Fatalf("parse config from %s: %v", rootCmd.ConfigFile.Filename, err)
+	}
+
+	clictx.Bind(cfg)
+	clictx.Bind(adminapi.SocketPath(rootCmd.AdminSocketPath))
 
 	clictx.BindTo(ctx, (*context.Context)(nil))
 	clictx.FatalIfErrorf(clictx.Run())

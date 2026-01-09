@@ -25,14 +25,13 @@ On the server host:
 ```bash
 go run ./cmd/passidp \
   --config=etc/dev-config.hujson \
-  --db-path=data/idp.db \
+  --admin-socket-path=data/admin.sock \
   serve \
   --cert-file=dev-cert.pem \
   --key-file=dev-key.pem \
   --listen-addr=localhost:8085 \
   --credential-store-path=data/credentials.json \
   --state-path=data/state.bolt \
-  --admin-socket-path=data/admin.sock
 ```
 
 **Note:** The `--admin-socket-path` is optional but required for credential management commands. The socket directory must exist and be writable by the server process.
@@ -65,8 +64,8 @@ On the server host:
 ```bash
 go run ./cmd/passidp \
   --config=etc/dev-config.hujson \
+  --admin-socket-path=data/admin.sock \
   add-credential \
-  --socket-path=data/admin.sock \
   --user-id=da5b51ac-0efd-4631-8790-9f02d516527c
 ```
 
@@ -91,8 +90,8 @@ On the server host, use the enrollment ID and confirmation key from Step 2:
 ```bash
 go run ./cmd/passidp \
   --config=etc/dev-config.hujson \
+  --admin-socket-path=data/admin.sock \
   confirm-credential \
-  --socket-path=data/admin.sock \
   --user-id=da5b51ac-0efd-4631-8790-9f02d516527c \
   --enrollment-id=123e4567-e89b-12d3-a456-426614174000 \
   --confirmation-key=987fcdeb-51a2-43f1-9b8c-123456789abc
@@ -105,8 +104,9 @@ This activates the credential and makes it available for authentication.
 On the server host:
 
 ```bash
-passidp \
-  --config=etc/config.hujson \
+go run ./cmd/passidp \
+  --config=etc/dev-config.hujson \
+  --admin-socket-path=data/admin.sock \
   list-credentials
 ```
 

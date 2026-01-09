@@ -4,31 +4,21 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 
-	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/adminapi"
 )
 
 type DeleteCredentialCmd struct {
 	CredentialID string `required:"" help:"ID of the credential to delete."`
-	SocketPath   string `required:"" env:"IDP_ADMIN_SOCKET_PATH" help:"Path to admin API Unix socket."`
 
 	Output io.Writer `kong:"-"`
 }
 
-func (c *DeleteCredentialCmd) Run(ctx context.Context, cfg *config.Config) error {
+func (c *DeleteCredentialCmd) Run(ctx context.Context, adminSocket adminapi.SocketPath) error {
 	if c.Output == nil {
 		c.Output = os.Stdout
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", c.SocketPath)
-			},
-		},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("http://unix/admin/credentials/%s", c.CredentialID), nil)
@@ -36,7 +26,7 @@ func (c *DeleteCredentialCmd) Run(ctx context.Context, cfg *config.Config) error
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := adminapi.NewClient(adminSocket).Do(req)
 	if err != nil {
 		return fmt.Errorf("call admin API: %w", err)
 	}

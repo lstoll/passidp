@@ -28,12 +28,12 @@ type Server struct {
 }
 
 // NewServer creates a new admin API server.
-func NewServer(state *storage.State, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], socketPath string) *Server {
+func NewServer(state *storage.State, cfg *config.Config, credStore *jsonfile.JSONFile[storage.CredentialStore], socketPath SocketPath) *Server {
 	return &Server{
 		state:      state,
 		config:     cfg,
 		credStore:  credStore,
-		socketPath: socketPath,
+		socketPath: string(socketPath),
 	}
 }
 

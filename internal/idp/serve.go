@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"crawshaw.dev/jsonfile"
-	"github.com/alecthomas/kong"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/oklog/run"
@@ -33,24 +32,17 @@ import (
 )
 
 type ServeCmd struct {
-	ListenAddr          string                    `default:"localhost:8085" env:"IDP_LISTEN_ADDR" help:"Listen address for the server."`
-	MetricsAddr         string                    `env:"IDP_METRICS_ADDR" help:"Expose Prometheus metrics on the given host:port."`
-	CertFile            string                    `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
-	KeyFile             string                    `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
-	CredentialStorePath string                    `env:"IDP_CREDENTIAL_STORE_PATH" required:"" help:"Path to the credential store file."`
-	StatePath           string                    `env:"IDP_STATE_PATH" required:"" help:"Path to the state file."`
-	ConfigFile          kong.NamedFileContentFlag `name:"config" required:"" env:"IDP_CONFIG_FILE" help:"Path to the config file."`
-	AdminSocketPath     string                    `env:"IDP_ADMIN_SOCKET_PATH" help:"Path to Unix socket to serve the admin API (optional)."`
+	ListenAddr          string `default:"localhost:8085" env:"IDP_LISTEN_ADDR" help:"Listen address for the server."`
+	MetricsAddr         string `env:"IDP_METRICS_ADDR" help:"Expose Prometheus metrics on the given host:port."`
+	CertFile            string `env:"IDP_CERT_FILE" help:"Path to the TLS certificate file."`
+	KeyFile             string `env:"IDP_KEY_FILE" help:"Path to the TLS key file."`
+	CredentialStorePath string `env:"IDP_CREDENTIAL_STORE_PATH" required:"" help:"Path to the credential store file."`
+	StatePath           string `env:"IDP_STATE_PATH" required:"" help:"Path to the state file."`
 }
 
-func (c *ServeCmd) Run(ctx context.Context) error {
+func (c *ServeCmd) Run(ctx context.Context, config *config.Config, adminSocket adminapi.SocketPath) error {
 	var g run.Group
 	g.Add(run.ContextHandler(ctx))
-
-	config, err := config.ParseConfig(c.ConfigFile.Contents)
-	if err != nil {
-		return fmt.Errorf("parse config from %s: %w", c.ConfigFile.Filename, err)
-	}
 
 	credStore, err := storage.NewCredentialStore(c.CredentialStorePath)
 	if err != nil {
@@ -76,8 +68,8 @@ func (c *ServeCmd) Run(ctx context.Context) error {
 	}
 
 	// Start admin API server if socket path is provided
-	if c.AdminSocketPath != "" {
-		adminServer := adminapi.NewServer(state, config, credStore, c.AdminSocketPath)
+	if adminSocket != "" {
+		adminServer := adminapi.NewServer(state, config, credStore, adminSocket)
 		if err := adminServer.Start(ctx, &g); err != nil {
 			return fmt.Errorf("start admin API server: %w", err)
 		}

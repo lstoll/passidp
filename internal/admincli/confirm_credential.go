@@ -6,18 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 
-	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/adminapi"
 )
 
 type ConfirmCredentialCmd struct {
 	UserID          string `required:"" help:"ID of user the credential belongs to."`
 	EnrollmentID    string `required:"" help:"ID of the enrollment to confirm."`
 	ConfirmationKey string `required:"" help:"Confirmation key from the enrollment."`
-	SocketPath      string `required:"" env:"IDP_ADMIN_SOCKET_PATH" help:"Path to admin API Unix socket."`
 
 	Output io.Writer `kong:"-"`
 }
@@ -33,7 +31,7 @@ type confirmEnrollmentResponse struct {
 	UserID string `json:"user_id"`
 }
 
-func (c *ConfirmCredentialCmd) Run(ctx context.Context, cfg *config.Config) error {
+func (c *ConfirmCredentialCmd) Run(ctx context.Context, adminSocket adminapi.SocketPath) error {
 	if c.Output == nil {
 		c.Output = os.Stdout
 	}
@@ -49,21 +47,13 @@ func (c *ConfirmCredentialCmd) Run(ctx context.Context, cfg *config.Config) erro
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", c.SocketPath)
-			},
-		},
-	}
-
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix/admin/enrollments/confirm", bytes.NewReader(reqJSON))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := adminapi.NewClient(adminSocket).Do(req)
 	if err != nil {
 		return fmt.Errorf("call admin API: %w", err)
 	}

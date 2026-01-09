@@ -14,7 +14,6 @@ import (
 	promversion "github.com/prometheus/common/version"
 	"golang.org/x/term"
 	"lds.li/passidp/internal/admincli"
-	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/idp"
 )
 
@@ -45,8 +44,6 @@ func init() {
 
 var rootCmd = struct {
 	Debug bool `env:"DEBUG" help:"Enable debug logging"`
-
-	ConfigFile kong.NamedFileContentFlag `name:"config" required:"" env:"IDP_CONFIG_FILE" help:"Path to the config file."`
 
 	Version kong.VersionFlag `help:"Print version information"`
 
@@ -89,17 +86,6 @@ func main() {
 	}
 	slog.SetDefault(slog.New(handler))
 
-	config, err := config.ParseConfig(rootCmd.ConfigFile.Contents)
-	if err != nil {
-		slog.Error("parse config", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-
-	if clictx.Selected().Name != "serve" {
-		// TODO - error if admmin sock not set.
-	}
-
 	clictx.BindTo(ctx, (*context.Context)(nil))
-	clictx.Bind(config)
 	clictx.FatalIfErrorf(clictx.Run())
 }

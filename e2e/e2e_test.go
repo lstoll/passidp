@@ -17,6 +17,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 
+	"github.com/alecthomas/kong"
 	"github.com/chromedp/cdproto/runtime"
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
@@ -141,9 +142,10 @@ func TestE2E(t *testing.T) {
 			KeyFile:             keyPath,
 			CredentialStorePath: credstorePath,
 			StatePath:           statePath,
+			ConfigFile:          kong.NamedFileContentFlag{Filename: "testdata/config.hujson", Contents: cfgb},
 			AdminSocketPath:     adminSocketPath,
 		}
-		serveErr <- idpCmd.Run(serveCtx, config)
+		serveErr <- idpCmd.Run(serveCtx)
 	}()
 
 	select {

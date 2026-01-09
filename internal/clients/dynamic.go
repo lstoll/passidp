@@ -31,10 +31,18 @@ func (d *DynamicClient) UseOverrideSubject() bool {
 }
 
 // AccessIDTokenValidity returns the validity time for access/ID tokens. If
-// 0, the default validity time will be used.
-func (d *DynamicClient) AccessIDTokenValidity() time.Duration {
+// nil, the default validity time will be used.
+func (d *DynamicClient) AccessIDTokenValidity() *time.Duration {
 	// dynamic clients can't set their own validity time
-	return 0
+	return nil
+}
+
+func (d *DynamicClient) RefreshValidity() *time.Duration {
+	return nil
+}
+
+func (d *DynamicClient) DPoPRefreshValidity() *time.Duration {
+	return nil
 }
 
 func (d *DynamicClient) RequiredGroups() []string {

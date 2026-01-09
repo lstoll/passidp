@@ -26,8 +26,16 @@ func (c *StaticClient) UseOverrideSubject() bool {
 	return c.configClient.UseOverrideSubject
 }
 
-func (c *StaticClient) AccessIDTokenValidity() time.Duration {
+func (c *StaticClient) AccessIDTokenValidity() *time.Duration {
 	return c.configClient.ParsedTokenValidity
+}
+
+func (c *StaticClient) RefreshValidity() *time.Duration {
+	return c.configClient.ParsedRefreshValidity
+}
+
+func (c *StaticClient) DPoPRefreshValidity() *time.Duration {
+	return c.configClient.ParsedDPoPRefreshValidity
 }
 
 func (c *StaticClient) RequiredGroups() []string {

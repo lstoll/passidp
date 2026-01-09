@@ -117,6 +117,14 @@ lds.li/oauth2ext v0.1.2-0.20260109002007-58218ec81543 h1:gGbkkqddyM/IK33ClAWKsos
 lds.li/oauth2ext v0.1.2-0.20260109002007-58218ec81543/go.mod h1:D/XWELrFqPCe41aSOmFY6tZ1jUWn7M3z2HrAGrU0SZc=
 lds.li/oauth2ext v0.1.2-0.20260109002427-35a01d04dfb9 h1:8TiLE+MgoQ+TK/0FxQ2bv58nDY0qLIv4JjYJAhH2Nrw=
 lds.li/oauth2ext v0.1.2-0.20260109002427-35a01d04dfb9/go.mod h1:D/XWELrFqPCe41aSOmFY6tZ1jUWn7M3z2HrAGrU0SZc=
+lds.li/oauth2ext v0.1.2-0.20260109211712-0dcf35ae414b h1:jN/WMNWGxv+nmF7TqqoZksBIIwvwmAof3jLjtKNRmb8=
+lds.li/oauth2ext v0.1.2-0.20260109211712-0dcf35ae414b/go.mod h1:D/XWELrFqPCe41aSOmFY6tZ1jUWn7M3z2HrAGrU0SZc=
+lds.li/oauth2ext v0.1.2-0.20260112201117-e4bd59b2e543 h1:6p/ixwZvdjRCPMJx6ihJEveX3tNTW8sD2NEnCvSSk9U=
+lds.li/oauth2ext v0.1.2-0.20260112201117-e4bd59b2e543/go.mod h1:pkf0BaT9RZZij+jOp6s4qhe9l0Yk3ew5PRiwfO2t/O0=
+lds.li/oauth2ext v0.1.2-0.20260112235453-1f5bd472a058 h1:w/boHpGMgysHcvr2eqA2EEAZkpxApx1gDeI4K8ctHU4=
+lds.li/oauth2ext v0.1.2-0.20260112235453-1f5bd472a058/go.mod h1:pkf0BaT9RZZij+jOp6s4qhe9l0Yk3ew5PRiwfO2t/O0=
+lds.li/oauth2ext v0.1.2-0.20260113173736-d5c5a78d6463 h1:AfK4nCNlCs5wAKcK13fwtAUA9UNasfqI5L8wh1gDEcw=
+lds.li/oauth2ext v0.1.2-0.20260113173736-d5c5a78d6463/go.mod h1:N3MY+0jF8HHHLGiLcK9uu+v1rbF+HHeQP62n6ZO+BEg=
 lds.li/tinkrotate v0.1.0 h1:HV9O4ZDIJk0qjj+h8SRPUaIun150V5AzbgBW5MiN2TI=
 lds.li/tinkrotate v0.1.0/go.mod h1:IEnrfMJh6eXt4KkPtWqrakAfkSg/DcjEMOmROaLmVEs=
 lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7 h1:VkrXbeFmpT9H2BExLmfr1zPPJwjk/Y1DVAQL3CNbWvg=

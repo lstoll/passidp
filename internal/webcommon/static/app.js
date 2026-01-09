@@ -542,6 +542,12 @@ class GrantManagerUI {
                 if (successEl) successEl.style.display = 'none';
             });
         }
+        
+        // Revoke all button
+        const revokeAllBtn = document.getElementById('revoke-all-btn');
+        if (revokeAllBtn) {
+            revokeAllBtn.addEventListener('click', () => this.revokeAllGrants());
+        }
     }
 
     async loadGrants() {
@@ -635,6 +641,28 @@ class GrantManagerUI {
         } catch (error) {
             console.error('Error revoking grant:', error);
             this.showError(`Failed to revoke session: ${error.message}`);
+        }
+    }
+
+    async revokeAllGrants() {
+        if (!confirm('Are you sure you want to revoke ALL sessions? All applications will lose access.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/grants', {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to revoke all sessions');
+            }
+
+            this.showSuccess('All sessions revoked successfully');
+            await this.loadGrants();
+        } catch (error) {
+            console.error('Error revoking all grants:', error);
+            this.showError(`Failed to revoke all sessions: ${error.message}`);
         }
     }
 

@@ -30,11 +30,21 @@ type Client struct {
 	// TokenValidity overrides the default valitity time for ID/access tokens.
 	// Go duration format.
 	TokenValidity string `json:"tokenValidity"`
+	// RefreshValidity overrides the default validity time for refresh tokens.
+	// Go duration format. If 0, refresh tokens will not be issued.
+	RefreshValidity string `json:"refreshValidity,omitempty"`
+	// DPoPRefreshValidity overrides the default validity time for refresh tokens
+	// when DPoP is used. Go duration format.
+	DPoPRefreshValidity string `json:"dpopRefreshValidity,omitempty"`
 	// RequiredGroups is a list of group names that the user must be a member of
 	// to access this client. If empty, no group membership is required.
 	RequiredGroups []string `json:"requiredGroups"`
 
 	// ParsedTokenValidity is the parsed token validity time, this happens at
 	// validation time.
-	ParsedTokenValidity time.Duration `json:"-"`
+	ParsedTokenValidity *time.Duration `json:"-"`
+	// ParsedRefreshValidity is the parsed refresh token validity time.
+	ParsedRefreshValidity *time.Duration `json:"-"`
+	// ParsedDPoPRefreshValidity is the parsed DPoP refresh token validity time.
+	ParsedDPoPRefreshValidity *time.Duration `json:"-"`
 }

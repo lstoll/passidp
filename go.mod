@@ -19,7 +19,7 @@ require (
 	golang.org/x/oauth2 v0.34.0
 	golang.org/x/term v0.38.0
 	google.golang.org/protobuf v1.36.11
-	lds.li/oauth2ext v0.1.2-0.20260109002427-35a01d04dfb9
+	lds.li/oauth2ext v0.1.2-0.20260113173736-d5c5a78d6463
 	lds.li/tinkrotate v0.1.0
 	lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7
 )

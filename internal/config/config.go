@@ -27,6 +27,21 @@ type Config struct {
 	SessionDuration string `json:"session_duration,omitempty"`
 	// ParsedSessionDuration is the parsed session duration.
 	ParsedSessionDuration time.Duration `json:"-"`
+
+	// TokenValidity is the duration a token is valid for. Defaults to 1h.
+	TokenValidity string `json:"token_validity,omitempty"`
+	// ParsedTokenValidity is the parsed token validity.
+	ParsedTokenValidity time.Duration `json:"-"`
+
+	// RefreshValidity is the duration a refresh token is valid for. Defaults to 24h.
+	RefreshValidity string `json:"refresh_validity,omitempty"`
+	// ParsedRefreshValidity is the parsed refresh validity.
+	ParsedRefreshValidity time.Duration `json:"-"`
+
+	// DPoPRefreshValidity is the duration a DPoP refresh token is valid for. Defaults to 24h.
+	DPoPRefreshValidity string `json:"dpop_refresh_validity,omitempty"`
+	// ParsedDPoPRefreshValidity is the parsed DPoP refresh validity.
+	ParsedDPoPRefreshValidity time.Duration `json:"-"`
 }
 
 // ParseConfig parses the config from the given file, expanding environment
@@ -56,6 +71,15 @@ func (c *Config) SetDefaults() error {
 	if c.SessionDuration == "" {
 		c.SessionDuration = "1h"
 	}
+	if c.TokenValidity == "" {
+		c.TokenValidity = "1h"
+	}
+	if c.RefreshValidity == "" {
+		c.RefreshValidity = "24h"
+	}
+	if c.DPoPRefreshValidity == "" {
+		c.DPoPRefreshValidity = "24h"
+	}
 	return nil
 }
 
@@ -68,6 +92,30 @@ func (c *Config) Validate() error {
 			validErr = errors.Join(validErr, fmt.Errorf("invalid session duration: %w", err))
 		}
 		c.ParsedSessionDuration = d
+	}
+
+	if c.TokenValidity != "" {
+		d, err := time.ParseDuration(c.TokenValidity)
+		if err != nil {
+			validErr = errors.Join(validErr, fmt.Errorf("invalid token validity: %w", err))
+		}
+		c.ParsedTokenValidity = d
+	}
+
+	if c.RefreshValidity != "" {
+		d, err := time.ParseDuration(c.RefreshValidity)
+		if err != nil {
+			validErr = errors.Join(validErr, fmt.Errorf("invalid refresh validity: %w", err))
+		}
+		c.ParsedRefreshValidity = d
+	}
+
+	if c.DPoPRefreshValidity != "" {
+		d, err := time.ParseDuration(c.DPoPRefreshValidity)
+		if err != nil {
+			validErr = errors.Join(validErr, fmt.Errorf("invalid dpop refresh validity: %w", err))
+		}
+		c.ParsedDPoPRefreshValidity = d
 	}
 
 	if c.Issuer == "" {
@@ -95,7 +143,21 @@ func (c *Config) Validate() error {
 			if err != nil {
 				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid token validity: %w", cl.ID, err))
 			}
-			c.Clients[ci].ParsedTokenValidity = tokenValidity
+			c.Clients[ci].ParsedTokenValidity = &tokenValidity
+		}
+		if cl.RefreshValidity != "" {
+			refreshValidity, err := time.ParseDuration(cl.RefreshValidity)
+			if err != nil {
+				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid refresh validity: %w", cl.ID, err))
+			}
+			c.Clients[ci].ParsedRefreshValidity = &refreshValidity
+		}
+		if cl.DPoPRefreshValidity != "" {
+			dpopRefreshValidity, err := time.ParseDuration(cl.DPoPRefreshValidity)
+			if err != nil {
+				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid dpop refresh validity: %w", cl.ID, err))
+			}
+			c.Clients[ci].ParsedDPoPRefreshValidity = &dpopRefreshValidity
 		}
 	}
 

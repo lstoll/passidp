@@ -19,7 +19,7 @@ const (
 
 // SessionKV implements session.KV using BoltDB
 type SessionKV struct {
-	db *bolt.DB
+	dbAccessor *dbAccessor
 }
 
 // storedSession represents a session stored in BoltDB
@@ -30,8 +30,11 @@ type storedSession struct {
 
 // Get retrieves a value by key, checking expiration
 func (s *SessionKV) Get(ctx context.Context, key string) (_ []byte, found bool, _ error) {
+	db, release := s.dbAccessor.db()
+	defer release()
+
 	var data []byte
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketSessions))
 		if bucket == nil {
 			return nil // No bucket means no session
@@ -69,7 +72,10 @@ func (s *SessionKV) Get(ctx context.Context, key string) (_ []byte, found bool, 
 
 // Set stores a key with a given value and expiration time, creating or updating as needed
 func (s *SessionKV) Set(ctx context.Context, key string, expiresAt time.Time, value []byte) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	db, release := s.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketSessions))
 		if bucket == nil {
 			return fmt.Errorf("sessions bucket does not exist")
@@ -95,7 +101,10 @@ func (s *SessionKV) Set(ctx context.Context, key string, expiresAt time.Time, va
 
 // Delete removes a key from the store
 func (s *SessionKV) Delete(ctx context.Context, key string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	db, release := s.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketSessions))
 		if bucket == nil {
 			return nil // No bucket means nothing to delete
@@ -112,7 +121,10 @@ func (s *SessionKV) Delete(ctx context.Context, key string) error {
 // GC performs garbage collection, removing expired sessions
 func (s *SessionKV) GC() (deleted int, _ error) {
 	var count int
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	db, release := s.dbAccessor.db()
+	defer release()
+
+	err := db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketSessions))
 		if bucket == nil {
 			return nil // No bucket means nothing to clean

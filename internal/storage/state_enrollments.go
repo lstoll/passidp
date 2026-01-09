@@ -29,7 +29,7 @@ type PendingEnrollment struct {
 
 // PendingEnrollments implements pending enrollment storage using BoltDB
 type PendingEnrollments struct {
-	db *bolt.DB
+	dbAccessor *dbAccessor
 }
 
 var errStopIteration = fmt.Errorf("stop iteration")
@@ -37,7 +37,10 @@ var errStopIteration = fmt.Errorf("stop iteration")
 // iteratePendingEnrollments iterates through all pending enrollments and calls the provided function
 // for each enrollment. If the function returns false, iteration stops.
 func (p *PendingEnrollments) iteratePendingEnrollments(fn func(*PendingEnrollment) (bool, error)) error {
-	return p.db.View(func(tx *bolt.Tx) error {
+	db, release := p.dbAccessor.db()
+	defer release()
+
+	return db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketPendingEnrollments))
 		if bucket == nil {
 			return fmt.Errorf("pending enrollments bucket not found")
@@ -73,6 +76,9 @@ func (p *PendingEnrollments) iteratePendingEnrollments(fn func(*PendingEnrollmen
 
 // CreatePendingEnrollment creates a new pending enrollment for a user.
 func (p *PendingEnrollments) CreatePendingEnrollment(userID uuid.UUID) (*PendingEnrollment, error) {
+	db, release := p.dbAccessor.db()
+	defer release()
+
 	enrollment := &PendingEnrollment{
 		ID:            uuid.New(),
 		UserID:        userID,
@@ -80,7 +86,7 @@ func (p *PendingEnrollments) CreatePendingEnrollment(userID uuid.UUID) (*Pending
 		CreatedAt:     time.Now(),
 	}
 
-	if err := p.db.Update(func(tx *bolt.Tx) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketPendingEnrollments))
 		if bucket == nil {
 			return fmt.Errorf("pending enrollments bucket not found")
@@ -127,8 +133,12 @@ func (p *PendingEnrollments) GetPendingEnrollmentByKey(enrollmentKey string) (*P
 
 // GetPendingEnrollmentByID retrieves a pending enrollment by its ID.
 func (p *PendingEnrollments) GetPendingEnrollmentByID(enrollmentID uuid.UUID) (*PendingEnrollment, error) {
+	db, release := p.dbAccessor.db()
+	defer release()
+
 	var enrollment *PendingEnrollment
-	err := p.db.View(func(tx *bolt.Tx) error {
+
+	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketPendingEnrollments))
 		if bucket == nil {
 			return fmt.Errorf("pending enrollments bucket not found")
@@ -156,7 +166,10 @@ func (p *PendingEnrollments) GetPendingEnrollmentByID(enrollmentID uuid.UUID) (*
 
 // UpdatePendingEnrollment updates a pending enrollment with credential data and confirmation key.
 func (p *PendingEnrollments) UpdatePendingEnrollment(enrollmentID uuid.UUID, credentialID []byte, credentialData *webauthn.Credential, name string, confirmationKey string) error {
-	return p.db.Update(func(tx *bolt.Tx) error {
+	db, release := p.dbAccessor.db()
+	defer release()
+
+	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketPendingEnrollments))
 		if bucket == nil {
 			return fmt.Errorf("pending enrollments bucket not found")
@@ -193,8 +206,12 @@ func (p *PendingEnrollments) UpdatePendingEnrollment(enrollmentID uuid.UUID, cre
 // ConfirmPendingEnrollment confirms a pending enrollment and returns the enrollment data.
 // After confirmation, the enrollment is deleted from the pending store.
 func (p *PendingEnrollments) ConfirmPendingEnrollment(enrollmentID uuid.UUID, confirmationKey string) (*PendingEnrollment, error) {
+	db, release := p.dbAccessor.db()
+	defer release()
+
 	var enrollment *PendingEnrollment
-	err := p.db.Update(func(tx *bolt.Tx) error {
+
+	err := db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketPendingEnrollments))
 		if bucket == nil {
 			return fmt.Errorf("pending enrollments bucket not found")
@@ -252,10 +269,13 @@ func (p *PendingEnrollments) ListPendingEnrollmentsByUser(userID uuid.UUID) ([]*
 // GarbageCollectPendingEnrollments removes pending enrollments older than pendingEnrollmentMaxAge.
 // Returns the number of enrollments deleted.
 func (p *PendingEnrollments) GarbageCollectPendingEnrollments() (int, error) {
+	db, release := p.dbAccessor.db()
+	defer release()
+
 	var deletedCount int
 	cutoff := time.Now().Add(-pendingEnrollmentMaxAge)
 
-	err := p.db.Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketPendingEnrollments))
 		if bucket == nil {
 			return fmt.Errorf("pending enrollments bucket not found")

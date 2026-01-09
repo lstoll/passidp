@@ -47,9 +47,7 @@ var (
 	}
 )
 
-func initKeysets(ctx context.Context, state *storage.State) (oidcKeyset *KeysetSigner, _ error) {
-	store := storage.NewKeysetStore(state)
-
+func initKeysets(ctx context.Context, store *storage.KeysetStore) (oidcKeyset *KeysetSigner, _ error) {
 	autoRotator, err := tinkrotate.NewAutoRotator(store, 10*time.Minute, &tinkrotate.AutoRotatorOpts{
 		ProvisionPolicies: map[string]*tinkrotatev1.RotationPolicy{
 			keysetIDOIDC:      oidcRotatePolicy,

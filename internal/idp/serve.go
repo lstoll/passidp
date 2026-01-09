@@ -14,6 +14,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"lds.li/oauth2ext/dpop"
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oauth2as/discovery"
 	"lds.li/passidp/internal/adminapi"
@@ -232,6 +233,8 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Clients:  clients,
 		Signer:   oidcHandles,
 		Verifier: oidcHandles,
+
+		DPoPVerifier: &dpop.DPoPVerifier{},
 
 		TokenHandler:    oidchHandlers.TokenHandler,
 		UserinfoHandler: oidchHandlers.UserinfoHandler,

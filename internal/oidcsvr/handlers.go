@@ -77,6 +77,10 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		idc.Subject = &user.OverrideSubject
 	}
 
+	if v := user.PreferredUsername; v != "" {
+		idc.CustomClaims["preferred_username"] = v
+	}
+
 	resp := &oauth2as.TokenResponse{
 		IDClaims: &idc,
 	}
@@ -105,19 +109,21 @@ func (h *Handlers) UserinfoHandler(ctx context.Context, uireq *oauth2as.Userinfo
 
 	nsp := strings.Split(user.FullName, " ")
 	cl := struct {
-		Email         string   `json:"email"`
-		EmailVerified bool     `json:"email_verified"`
-		Picture       string   `json:"picture"`
-		Name          string   `json:"name"`
-		Groups        []string `json:"groups"`
-		GivenName     string   `json:"given_name,omitempty"`
-		FamilyName    string   `json:"family_name,omitempty"`
+		Email             string   `json:"email"`
+		EmailVerified     bool     `json:"email_verified"`
+		Picture           string   `json:"picture"`
+		Name              string   `json:"name"`
+		Groups            []string `json:"groups"`
+		GivenName         string   `json:"given_name,omitempty"`
+		FamilyName        string   `json:"family_name,omitempty"`
+		PreferredUsername string   `json:"preferred_username,omitzero"`
 	}{
-		Email:         user.Email,
-		EmailVerified: true,
-		Picture:       gravatarURL(user.Email),
-		Name:          user.FullName,
-		Groups:        user.Groups,
+		Email:             user.Email,
+		EmailVerified:     true,
+		Picture:           gravatarURL(user.Email),
+		Name:              user.FullName,
+		Groups:            user.Groups,
+		PreferredUsername: user.PreferredUsername,
 	}
 	if len(nsp) == 2 {
 		cl.GivenName = nsp[0]

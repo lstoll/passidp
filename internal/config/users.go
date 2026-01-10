@@ -26,6 +26,11 @@ type User struct {
 	// Groups is a list of group names that a user is a member of.
 	Groups []string `json:"groups,omitzero"`
 
+	// PreferredUsername is the user's preferred username. If set, the
+	// preferred_username claim will be set in the user info and token
+	// responses.
+	PreferredUsername string `json:"preferredUsername"`
+
 	// EnrollmentKey is a key that can be used to enroll a user. THIS SHOULD NOT
 	// BE SET OUTSIDE THE E2E TESTS. It will be replaced with a better model in
 	// the near future.

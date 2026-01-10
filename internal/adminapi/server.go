@@ -184,6 +184,7 @@ func (s *Server) handleConfirmEnrollment(w http.ResponseWriter, r *http.Request)
 			CredentialData: enrollment.CredentialData,
 			Name:           enrollment.Name,
 			UserID:         enrollment.UserID,
+			CreatedAt:      time.Now(),
 		})
 		return nil
 	}); err != nil {

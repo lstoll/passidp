@@ -85,6 +85,11 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		IDClaims: &idc,
 	}
 
+	slog.Info("DPoPBound", "dpopBound", req.DPoPBound)
+	if req.DPoPBound {
+		resp.RefreshTokenValidUntil = time.Now().Add(7 * 24 * time.Hour)
+	}
+
 	if cl.AccessIDTokenValidity() > 0 {
 		resp.AccessTokenExpiry = time.Now().Add(cl.AccessIDTokenValidity())
 		resp.IDTokenExpiry = time.Now().Add(cl.AccessIDTokenValidity())

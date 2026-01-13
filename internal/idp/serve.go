@@ -261,6 +261,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		OAuth2AS:  oauth2asServer,
 		Discovery: disco,
 		Clients:   clients,
+		Config:    cfg,
 	}
 
 	oidcs.AddHandlers(websvr)

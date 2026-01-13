@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/tink-crypto/tink-go/v2/jwt"
 	"github.com/tink-crypto/tink-go/v2/keyset"
@@ -218,5 +219,64 @@ func TestKeysetStoreOptimisticLocking(t *testing.T) {
 	err = store.WriteKeysetAndMetadata(context.Background(), "non-existent", handle, metadata, int64(1))
 	if err != tinkrotate.ErrOptimisticLockFailed {
 		t.Errorf("expected ErrOptimisticLockFailed when updating non-existent keyset, got %v", err)
+	}
+}
+
+func TestKeysetStoreDeadlock(t *testing.T) {
+	state, err := NewState(t.TempDir() + "/state.bolt")
+	if err != nil {
+		t.Fatalf("failed to create state: %v", err)
+	}
+	// don't defer the close here, because it'll hang the test if it is
+	// deadlocked. just let the process die and clean it up.
+
+	store := state.KeysetStore()
+
+	handle, err := keyset.NewHandle(jwt.ES256Template())
+	if err != nil {
+		t.Fatalf("failed to create keyset handle: %v", err)
+	}
+
+	keysetName := "test-keyset"
+	metadata := &tinkrotatev1.KeyRotationMetadata{
+		RotationPolicy: &tinkrotatev1.RotationPolicy{
+			KeyTemplate: jwt.ES256Template(),
+		},
+	}
+
+	err = store.WriteKeysetAndMetadata(context.Background(), keysetName, handle, metadata, nil)
+	if err != nil {
+		t.Fatalf("failed to write keyset: %v", err)
+	}
+
+	done := make(chan error)
+
+	go func() {
+		// Try an update in a foreach - if locking isn't managed correctly, this
+		// will deadlock.
+		err := store.ForEachKeyset(context.Background(), func(name string) error {
+			result, err := store.ReadKeysetAndMetadata(context.Background(), name)
+			if err != nil {
+				return err
+			}
+
+			t.Log("Attempting WriteKeysetAndMetadata inside callback...")
+
+			err = store.WriteKeysetAndMetadata(context.Background(), name, handle, metadata, result.Context)
+			t.Log("WriteKeysetAndMetadata returned")
+			return err
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		state.db.Close() // Close explicitly on success/completion
+		if err != nil {
+			t.Fatalf("ForEachKeyset failed: %v", err)
+		}
+		t.Log("Test completed successfully (no deadlock)")
+	case <-time.After(1 * time.Second):
+		t.Fatal("Test timed out - DEADLOCK DETECTED")
 	}
 }

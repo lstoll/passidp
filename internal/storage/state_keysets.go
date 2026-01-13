@@ -189,14 +189,34 @@ func (k *KeysetStore) ForEachKeyset(ctx context.Context, fn func(keysetName stri
 	db, release := k.dbAccessor.db()
 	defer release()
 
-	return db.View(func(tx *bolt.Tx) error {
+	var keys []string
+
+	// capture all the keys first, the update will start a child write TX and
+	// will deadlock on the read TX. We only have a small number of keysets so
+	// this is cheap anyway.
+	//
+	// TODO - see if there's a better way to deal with the nested TX setup in
+	// tinkrotate.
+	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketKeysets))
 		if bucket == nil {
 			return nil // No bucket means no keysets
 		}
 
 		return bucket.ForEach(func(k, v []byte) error {
-			return fn(string(k))
+			keys = append(keys, string(k))
+			return nil
 		})
 	})
+	if err != nil {
+		return err
+	}
+
+	for _, key := range keys {
+		if err := fn(key); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

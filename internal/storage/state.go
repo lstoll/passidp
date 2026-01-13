@@ -12,14 +12,13 @@ import (
 
 // expectedBuckets is the set of bucket names that should exist in the database
 var expectedBuckets = map[string]bool{
-	bucketGrants:                 true,
-	bucketAuthCodes:              true,
-	bucketRefreshTokens:          true,
-	bucketKeysets:                true,
-	bucketSessions:               true,
-	bucketDynamicClients:         true,
-	bucketDynamicClientsBySecret: true,
-	bucketPendingEnrollments:     true,
+	bucketGrants:             true,
+	bucketAuthCodes:          true,
+	bucketRefreshTokens:      true,
+	bucketKeysets:            true,
+	bucketSessions:           true,
+	bucketDynamicClients:     true,
+	bucketPendingEnrollments: true,
 }
 
 const dbMode = 0o600

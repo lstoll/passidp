@@ -65,15 +65,15 @@ func (m *MultiClients) ClientOpts(ctx context.Context, clientID string) ([]oauth
 	return m.Dynamic.ClientOpts(ctx, clientID)
 }
 
-// ValidateClientSecret implements oauth2as.ClientSource
-func (m *MultiClients) ValidateClientSecret(ctx context.Context, clientID, clientSecret string) (bool, error) {
+// ClientSecrets implements oauth2as.ClientSource
+func (m *MultiClients) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
 	// Check static clients first
-	if ok, err := m.Static.ValidateClientSecret(ctx, clientID, clientSecret); err == nil {
-		return ok, nil
+	if secrets, err := m.Static.ClientSecrets(ctx, clientID); err == nil && len(secrets) > 0 {
+		return secrets, nil
 	}
 
 	// Then check dynamic clients
-	return m.Dynamic.ValidateClientSecret(ctx, clientID, clientSecret)
+	return m.Dynamic.ClientSecrets(ctx, clientID)
 }
 
 // RedirectURIs implements oauth2as.ClientSource

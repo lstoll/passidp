@@ -13,8 +13,7 @@ import (
 
 const (
 	// Bucket names for dynamic client storage
-	bucketDynamicClients         = "dynamic_clients"
-	bucketDynamicClientsBySecret = "dynamic_clients_by_secret"
+	bucketDynamicClients = "dynamic_clients"
 )
 
 var (
@@ -25,7 +24,7 @@ var (
 // DynamicClient represents a dynamic OIDC client
 type DynamicClient struct {
 	ID               string    `json:"id"`
-	ClientSecretHash string    `json:"client_secret_hash"`
+	ClientSecret     string    `json:"client_secret"`
 	RegistrationBlob string    `json:"registration_blob"`
 	CreatedAt        time.Time `json:"created_at"`
 	ExpiresAt        time.Time `json:"expires_at"`
@@ -77,7 +76,7 @@ func (s *DynamicClientStore) GetDynamicClient(ctx context.Context, id string) (*
 }
 
 // CreateDynamicClient creates a new dynamic client
-func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, secretHash, registrationBlob string, expiresAt time.Time) error {
+func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, clientSecret, registrationBlob string, expiresAt time.Time) error {
 	db, release := s.dbAccessor.db()
 	defer release()
 
@@ -87,24 +86,14 @@ func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, secret
 			return fmt.Errorf("dynamic_clients bucket does not exist")
 		}
 
-		secretBucket := tx.Bucket([]byte(bucketDynamicClientsBySecret))
-		if secretBucket == nil {
-			return fmt.Errorf("dynamic_clients_by_secret bucket does not exist")
-		}
-
 		// Check if client already exists
 		if clientsBucket.Get([]byte(id)) != nil {
 			return fmt.Errorf("client %s already exists", id)
 		}
 
-		// Check if secret hash is already in use
-		if secretBucket.Get([]byte(secretHash)) != nil {
-			return fmt.Errorf("client secret hash already in use")
-		}
-
 		client := DynamicClient{
 			ID:               id,
-			ClientSecretHash: secretHash,
+			ClientSecret:     clientSecret,
 			RegistrationBlob: registrationBlob,
 			CreatedAt:        time.Now(),
 			ExpiresAt:        expiresAt,
@@ -119,11 +108,6 @@ func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, secret
 		// Store client by ID
 		if err := clientsBucket.Put([]byte(id), data); err != nil {
 			return fmt.Errorf("store dynamic client: %w", err)
-		}
-
-		// Store index: secret hash -> client ID
-		if err := secretBucket.Put([]byte(secretHash), []byte(id)); err != nil {
-			return fmt.Errorf("store secret hash index: %w", err)
 		}
 
 		return nil
@@ -161,9 +145,6 @@ func (s *DynamicClientStore) DeactivateDynamicClient(ctx context.Context, id str
 		if err := clientsBucket.Put([]byte(id), updatedData); err != nil {
 			return fmt.Errorf("update dynamic client: %w", err)
 		}
-
-		// Note: We keep the secret hash index even when deactivated
-		// This allows cleanup to find and remove it later
 
 		return nil
 	})
@@ -218,58 +199,6 @@ func (s *DynamicClientStore) ListActiveDynamicClients(ctx context.Context) ([]*D
 	return clients, nil
 }
 
-// GetDynamicClientBySecretHash retrieves an active, non-expired dynamic client
-// by secret hash
-func (s *DynamicClientStore) GetDynamicClientBySecretHash(ctx context.Context, secretHash string) (*DynamicClient, error) {
-	db, release := s.dbAccessor.db()
-	defer release()
-
-	var client *DynamicClient
-
-	err := db.View(func(tx *bolt.Tx) error {
-		secretBucket := tx.Bucket([]byte(bucketDynamicClientsBySecret))
-		if secretBucket == nil {
-			return ErrDynamicClientNotFound
-		}
-
-		// Look up client ID from secret hash index
-		clientID := secretBucket.Get([]byte(secretHash))
-		if clientID == nil {
-			return ErrDynamicClientNotFound
-		}
-
-		// Look up client by ID
-		clientsBucket := tx.Bucket([]byte(bucketDynamicClients))
-		if clientsBucket == nil {
-			return ErrDynamicClientNotFound
-		}
-
-		data := clientsBucket.Get(clientID)
-		if data == nil {
-			return ErrDynamicClientNotFound
-		}
-
-		var stored DynamicClient
-		if err := json.Unmarshal(data, &stored); err != nil {
-			return fmt.Errorf("unmarshal dynamic client: %w", err)
-		}
-
-		// Check if client is active and not expired
-		if !stored.Active || time.Now().After(stored.ExpiresAt) {
-			return ErrDynamicClientNotFound
-		}
-
-		client = &stored
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
-
 // CleanupExpiredDynamicClients removes expired or inactive dynamic clients.
 // Returns the number of clients deleted.
 func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
@@ -284,14 +213,8 @@ func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
 			return nil // No bucket means nothing to clean
 		}
 
-		secretBucket := tx.Bucket([]byte(bucketDynamicClientsBySecret))
-		if secretBucket == nil {
-			return nil
-		}
-
 		now := time.Now()
 		var toDelete [][]byte
-		var secretHashes [][]byte
 
 		// Collect expired or inactive clients
 		err := clientsBucket.ForEach(func(k, v []byte) error {
@@ -304,7 +227,6 @@ func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
 
 			if !client.Active || now.After(client.ExpiresAt) {
 				toDelete = append(toDelete, k)
-				secretHashes = append(secretHashes, []byte(client.ClientSecretHash))
 			}
 
 			return nil
@@ -314,17 +236,10 @@ func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
 			return fmt.Errorf("iterating dynamic clients: %w", err)
 		}
 
-		// Delete expired/inactive clients and their index entries
-		for i, key := range toDelete {
+		// Delete expired/inactive clients
+		for _, key := range toDelete {
 			if err := clientsBucket.Delete(key); err != nil {
 				return fmt.Errorf("deleting expired/inactive client: %w", err)
-			}
-
-			// Also remove from secret hash index
-			if i < len(secretHashes) {
-				if err := secretBucket.Delete(secretHashes[i]); err != nil {
-					return fmt.Errorf("deleting secret hash index: %w", err)
-				}
 			}
 			deletedCount++
 		}

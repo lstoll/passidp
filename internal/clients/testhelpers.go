@@ -43,10 +43,10 @@ func createTestDynamicClient(t *testing.T, db *storage.DynamicClientStore, clien
 		t.Fatalf("failed to marshal request: %v", err)
 	}
 
-	// Use clientID as part of hash to ensure uniqueness
-	secretHash := fmt.Sprintf("test-hash-%s", clientID)
+	// Use clientID as part of secret to ensure uniqueness
+	testSecret := fmt.Sprintf("test-secret-%s", clientID)
 
-	if err := db.CreateDynamicClient(context.Background(), clientID, secretHash, string(reqBody), time.Now().AddDate(0, 0, 14)); err != nil {
+	if err := db.CreateDynamicClient(context.Background(), clientID, testSecret, string(reqBody), time.Now().AddDate(0, 0, 14)); err != nil {
 		t.Fatalf("failed to create test client: %v", err)
 	}
 }

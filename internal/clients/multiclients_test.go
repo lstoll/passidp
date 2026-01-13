@@ -103,58 +103,6 @@ func TestMultiClients_IsValidClientID(t *testing.T) {
 	}
 }
 
-func TestMultiClients_ValidateClientSecret(t *testing.T) {
-	staticClients := &StaticClients{
-		Clients: []config.Client{
-			{
-				ID:           "static-client",
-				RedirectURLs: []string{"https://example.com/callback"},
-				Secrets:      []string{"static-secret"},
-				Public:       false,
-			},
-		},
-	}
-
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	dynamicClients := &DynamicClients{DB: db}
-
-	// Create a dynamic client
-	req := defaultTestClientRequest()
-	createTestDynamicClient(t, db, "dc.dynamic-client", req)
-
-	multi := NewMultiClients(staticClients, dynamicClients)
-
-	// Test static client secret
-	valid, err := multi.ValidateClientSecret(context.Background(), "static-client", "static-secret")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if !valid {
-		t.Error("expected static client secret to be valid")
-	}
-
-	// Test static client with wrong secret
-	valid, err = multi.ValidateClientSecret(context.Background(), "static-client", "wrong-secret")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if valid {
-		t.Error("expected wrong static client secret to be invalid")
-	}
-
-	// Test dynamic client secret (this will fail since we don't have the actual secret)
-	// But it should not error
-	valid, err = multi.ValidateClientSecret(context.Background(), "dc.dynamic-client", "any-secret")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if valid {
-		t.Error("expected dynamic client secret to be invalid with wrong secret")
-	}
-}
-
 func TestMultiClients_RedirectURIs(t *testing.T) {
 	staticClients := &StaticClients{
 		Clients: []config.Client{

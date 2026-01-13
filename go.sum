@@ -125,6 +125,8 @@ lds.li/oauth2ext v0.1.2-0.20260112235453-1f5bd472a058 h1:w/boHpGMgysHcvr2eqA2EEA
 lds.li/oauth2ext v0.1.2-0.20260112235453-1f5bd472a058/go.mod h1:pkf0BaT9RZZij+jOp6s4qhe9l0Yk3ew5PRiwfO2t/O0=
 lds.li/oauth2ext v0.1.2-0.20260113173736-d5c5a78d6463 h1:AfK4nCNlCs5wAKcK13fwtAUA9UNasfqI5L8wh1gDEcw=
 lds.li/oauth2ext v0.1.2-0.20260113173736-d5c5a78d6463/go.mod h1:N3MY+0jF8HHHLGiLcK9uu+v1rbF+HHeQP62n6ZO+BEg=
+lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282 h1:1XldHwcICtvaQ1ySbetdubxGZxQEkpDqsdARgWIltTQ=
+lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282/go.mod h1:N3MY+0jF8HHHLGiLcK9uu+v1rbF+HHeQP62n6ZO+BEg=
 lds.li/tinkrotate v0.1.0 h1:HV9O4ZDIJk0qjj+h8SRPUaIun150V5AzbgBW5MiN2TI=
 lds.li/tinkrotate v0.1.0/go.mod h1:IEnrfMJh6eXt4KkPtWqrakAfkSg/DcjEMOmROaLmVEs=
 lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7 h1:VkrXbeFmpT9H2BExLmfr1zPPJwjk/Y1DVAQL3CNbWvg=

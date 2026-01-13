@@ -3,8 +3,6 @@ package clients
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,6 +17,8 @@ import (
 	"lds.li/passidp/internal/storage"
 	"lds.li/web"
 )
+
+var _ oauth2as.ClientSource = (*DynamicClients)(nil)
 
 // DynamicClient represents an retrieved dynamic client for the oidcsvr handler
 // to use. It is mostly a no-op wrapper, as oidcsvr handler doesn't depend on
@@ -191,23 +191,16 @@ func (d *DynamicClients) shouldEnforcePKCE(applicationType, redirectURIs string)
 	return false
 }
 
-// ValidateClientSecret implements oauth2as.ClientSource
-func (d *DynamicClients) ValidateClientSecret(ctx context.Context, clientID, clientSecret string) (bool, error) {
+func (d *DynamicClients) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
 	if !strings.HasPrefix(clientID, "dc.") {
-		return false, fmt.Errorf("client %s not found", clientID)
+		return nil, fmt.Errorf("client %s not found", clientID)
 	}
 
 	client, err := d.DB.GetDynamicClient(ctx, clientID)
 	if err != nil || client == nil {
-		return false, fmt.Errorf("client %s not found", clientID)
+		return nil, fmt.Errorf("client %s not found", clientID)
 	}
-
-	// Hash the provided secret
-	hash := sha256.Sum256([]byte(clientSecret))
-	providedHash := fmt.Sprintf("%x", hash)
-
-	// Compare hashes using constant time comparison
-	return subtle.ConstantTimeCompare([]byte(providedHash), []byte(client.ClientSecretHash)) == 1, nil
+	return []string{client.ClientSecret}, nil
 }
 
 // RedirectURIs implements oauth2as.ClientSource
@@ -248,10 +241,6 @@ func (d *DynamicClients) registerClient(w http.ResponseWriter, r *http.Request) 
 	clientID := fmt.Sprintf("dc.%s", uuid.New().String())
 	clientSecret := rand.Text()
 
-	// Hash the secret for storage
-	hash := sha256.Sum256([]byte(clientSecret))
-	clientSecretHash := fmt.Sprintf("%x", hash)
-
 	// Set expiration (14 days from now)
 	expiresAt := time.Now().AddDate(0, 0, 14)
 
@@ -263,7 +252,7 @@ func (d *DynamicClients) registerClient(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Store in database
-	if err := d.DB.CreateDynamicClient(r.Context(), clientID, clientSecretHash, string(metadataJSON), expiresAt); err != nil {
+	if err := d.DB.CreateDynamicClient(r.Context(), clientID, clientSecret, string(metadataJSON), expiresAt); err != nil {
 		http.Error(w, "failed to create client", http.StatusInternalServerError)
 		return
 	}

@@ -18,6 +18,7 @@ require (
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/oauth2 v0.34.0
 	golang.org/x/term v0.38.0
+	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.11
 	lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282
 	lds.li/tinkrotate v0.1.0

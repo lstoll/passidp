@@ -97,7 +97,7 @@ func main() {
 		}
 	}
 
-	cfg, err := config.ParseConfig(rootCmd.ConfigFile.Contents)
+	cfg, err := config.ParseConfig(rootCmd.ConfigFile)
 	if err != nil {
 		clictx.Fatalf("parse config from %s: %v", rootCmd.ConfigFile.Filename, err)
 	}

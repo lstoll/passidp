@@ -17,6 +17,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 
+	"github.com/alecthomas/kong"
 	"github.com/chromedp/cdproto/runtime"
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
@@ -107,7 +108,10 @@ func TestE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	config, err := config.ParseConfig(cfgb)
+	config, err := config.ParseConfig(kong.NamedFileContentFlag{
+		Filename: "testdata/config.hujson",
+		Contents: cfgb,
+	})
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
 	}

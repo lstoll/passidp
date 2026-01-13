@@ -22,6 +22,7 @@ require (
 	lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282
 	lds.li/tinkrotate v0.1.0
 	lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (

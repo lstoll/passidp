@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/alecthomas/kong"
 	"github.com/google/uuid"
 	"github.com/tailscale/hujson"
+	"sigs.k8s.io/yaml"
 )
 
 type Config struct {
@@ -46,12 +50,19 @@ type Config struct {
 
 // ParseConfig parses the config from the given file, expanding environment
 // variables and validating the config.
-func ParseConfig(file []byte) (*Config, error) {
-	scb := []byte(os.Expand(string(file), getenvWithDefault))
-	scb, err := hujson.Standardize(scb)
+func ParseConfig(cfgFile kong.NamedFileContentFlag) (*Config, error) {
+	scb := []byte(os.Expand(string(cfgFile.Contents), getenvWithDefault))
+
+	var err error
+	if slices.Contains([]string{".yaml", ".yml"}, filepath.Ext(cfgFile.Filename)) {
+		scb, err = yaml.YAMLToJSON(scb)
+	} else {
+		scb, err = hujson.Standardize(scb)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("standardize config: %w", err)
 	}
+
 	var c Config
 	dec := json.NewDecoder(bytes.NewReader(scb))
 	dec.DisallowUnknownFields()

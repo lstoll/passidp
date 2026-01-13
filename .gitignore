@@ -9,5 +9,6 @@ go.work*
 # for local/direct deploys
 fly.toml
 Dockerfile.fly
-/config.fly.hujson
+/config.fly.*
+
 /.cursor

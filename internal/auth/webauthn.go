@@ -53,6 +53,7 @@ func (a *Authenticator) AddHandlers(r *web.Server) {
 	// Grant management API
 	r.Handle("GET /api/grants", a.Middleware(web.BrowserHandlerFunc(a.HandleListGrants)))
 	r.Handle("DELETE /api/grants/", a.Middleware(web.BrowserHandlerFunc(a.HandleRevokeGrant)))
+	r.Handle("DELETE /api/grants", a.Middleware(web.BrowserHandlerFunc(a.HandleRevokeAllGrants)))
 }
 
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
@@ -280,11 +281,11 @@ func (a *Authenticator) HandleListGrants(ctx context.Context, w web.ResponseWrit
 	var resp listGrantsResponse
 	for _, g := range grants {
 		resp.Grants = append(resp.Grants, grantInfo{
-			ID:        g.ID.String(),
-			ClientID:  g.ClientID,
-			Scopes:    g.GrantedScopes,
-			GrantedAt: g.GrantedAt.Format(time.RFC3339),
-			ExpiresAt: g.ExpiresAt.Format(time.RFC3339),
+			ID:        g.ID,
+			ClientID:  g.Grant.ClientID,
+			Scopes:    g.Grant.GrantedScopes,
+			GrantedAt: g.Grant.GrantedAt.Format(time.RFC3339),
+			ExpiresAt: g.Grant.ExpiresAt.Format(time.RFC3339),
 		})
 	}
 
@@ -311,12 +312,7 @@ func (a *Authenticator) HandleRevokeGrant(ctx context.Context, w web.ResponseWri
 		return httperror.BadRequestErrf("grant ID required")
 	}
 
-	grantID, err := uuid.Parse(grantIDStr)
-	if err != nil {
-		return httperror.BadRequestErrf("invalid grant ID: %w", err)
-	}
-
-	grant, err := a.State.OAuth2State().GetGrant(ctx, grantID)
+	grant, err := a.State.OAuth2State().GetGrant(ctx, grantIDStr)
 	if err != nil {
 		return fmt.Errorf("get grant: %w", err)
 	}
@@ -327,8 +323,22 @@ func (a *Authenticator) HandleRevokeGrant(ctx context.Context, w web.ResponseWri
 		return httperror.NotFoundErrf("grant not found")
 	}
 
-	if err := a.State.OAuth2State().RevokeGrant(ctx, grantID); err != nil {
+	if err := a.State.OAuth2State().RevokeGrant(ctx, grantIDStr); err != nil {
 		return fmt.Errorf("revoke grant: %w", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (a *Authenticator) HandleRevokeAllGrants(ctx context.Context, w web.ResponseWriter, r *web.Request) error {
+	userID, ok := UserIDFromContext(ctx)
+	if !ok {
+		return httperror.BadRequestErrf("user not logged in")
+	}
+
+	if err := a.State.OAuth2State().RevokeAllGrantsForUser(ctx, userID.String()); err != nil {
+		return fmt.Errorf("revoke all grants: %w", err)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

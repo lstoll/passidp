@@ -21,8 +21,13 @@ type Client interface {
 	// subject for tokens/userinfo, if the user has one set.
 	UseOverrideSubject() bool
 	// AccessIDTokenValidity returns the validity time for access/ID tokens. If
-	// 0, the default validity time will be used.
-	AccessIDTokenValidity() time.Duration
+	// nil, the default validity time will be used.
+	AccessIDTokenValidity() *time.Duration
+	// RefreshValidity returns the validity time for refresh tokens.
+	RefreshValidity() *time.Duration
+	// DPoPRefreshValidity returns the validity time for refresh tokens when DPoP
+	// is used.
+	DPoPRefreshValidity() *time.Duration
 	// RequiredGroups returns the list of group names that the user must be a
 	// member of to access this client. If empty, no group membership is
 	// required.
@@ -85,15 +90,46 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		IDClaims: &idc,
 	}
 
-	slog.Info("DPoPBound", "dpopBound", req.DPoPBound)
+	// Determine refresh token validity
+	var refreshValidity time.Duration
+	var refreshSet bool
+
 	if req.DPoPBound {
-		resp.RefreshTokenValidUntil = time.Now().Add(7 * 24 * time.Hour)
+		if v := cl.DPoPRefreshValidity(); v != nil {
+			refreshValidity = *v
+			refreshSet = true
+		} else {
+			refreshValidity = h.Config.ParsedDPoPRefreshValidity
+			refreshSet = true
+		}
+	} else {
+		if v := cl.RefreshValidity(); v != nil {
+			refreshValidity = *v
+			refreshSet = true
+		} else {
+			refreshValidity = h.Config.ParsedRefreshValidity
+			refreshSet = true
+		}
 	}
 
-	if cl.AccessIDTokenValidity() > 0 {
-		resp.AccessTokenExpiry = time.Now().Add(cl.AccessIDTokenValidity())
-		resp.IDTokenExpiry = time.Now().Add(cl.AccessIDTokenValidity())
+	if refreshSet && refreshValidity > 0 {
+		resp.RefreshTokenValidUntil = time.Now().Add(refreshValidity)
 	}
+
+	// Determine access/ID token validity
+	var tokenValidity time.Duration
+	if v := cl.AccessIDTokenValidity(); v != nil {
+		tokenValidity = *v
+	} else {
+		tokenValidity = h.Config.ParsedTokenValidity
+	}
+
+	if tokenValidity > 0 {
+		resp.AccessTokenExpiry = time.Now().Add(tokenValidity)
+		resp.IDTokenExpiry = time.Now().Add(tokenValidity)
+	}
+
+	slog.Info("token handler", "userID", userUUID.String(), "clientID", req.ClientID, "refreshRequested", req.IsRefresh, "refreshSet", refreshSet, "refreshValidity", refreshValidity, "tokenValidity", tokenValidity, "dpopBound", req.DPoPBound)
 
 	return resp, nil
 }

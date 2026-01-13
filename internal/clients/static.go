@@ -11,6 +11,8 @@ import (
 	"lds.li/passidp/internal/oidcsvr"
 )
 
+var _ oauth2as.ClientSource = &StaticClients{}
+
 // StaticClients implements the oauth2as.ClientSource against a static list of clients.
 // The type is tagged, to enable loading from JSON/YAML.
 type StaticClients struct {
@@ -26,8 +28,16 @@ func (c *StaticClient) UseOverrideSubject() bool {
 	return c.configClient.UseOverrideSubject
 }
 
-func (c *StaticClient) AccessIDTokenValidity() time.Duration {
+func (c *StaticClient) AccessIDTokenValidity() *time.Duration {
 	return c.configClient.ParsedTokenValidity
+}
+
+func (c *StaticClient) RefreshValidity() *time.Duration {
+	return c.configClient.ParsedRefreshValidity
+}
+
+func (c *StaticClient) DPoPRefreshValidity() *time.Duration {
+	return c.configClient.ParsedDPoPRefreshValidity
 }
 
 func (c *StaticClient) RequiredGroups() []string {
@@ -69,16 +79,13 @@ func (c *StaticClients) ClientOpts(_ context.Context, clientID string) ([]oauth2
 	return nil, nil
 }
 
-func (c *StaticClients) ValidateClientSecret(_ context.Context, clientID, clientSecret string) (ok bool, err error) {
+func (c *StaticClients) ClientSecrets(_ context.Context, clientID string) ([]string, error) {
 	for _, cl := range c.Clients {
 		if cl.ID == clientID {
-			if len(cl.Secrets) == 0 && cl.Public {
-				return true, nil
-			}
-			return slices.Contains(cl.Secrets, clientSecret), nil
+			return cl.Secrets, nil
 		}
 	}
-	return false, fmt.Errorf("client %s not found", clientID)
+	return nil, fmt.Errorf("client %s not found", clientID)
 }
 
 func (c *StaticClients) RedirectURIs(_ context.Context, clientID string) ([]string, error) {

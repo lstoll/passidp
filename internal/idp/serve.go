@@ -234,7 +234,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Signer:   oidcHandles,
 		Verifier: oidcHandles,
 
-		DPoPVerifier: &dpop.DPoPVerifier{},
+		DPoPVerifier: &dpop.Verifier{},
 
 		TokenHandler:    oidchHandlers.TokenHandler,
 		UserinfoHandler: oidchHandlers.UserinfoHandler,

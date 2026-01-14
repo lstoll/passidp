@@ -127,7 +127,7 @@ func (k *KeysetStore) WriteKeysetAndMetadata(ctx context.Context, keysetName str
 	db, release := k.dbAccessor.db()
 	defer release()
 
-	return db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketKeysets))
 		if bucket == nil {
 			return fmt.Errorf("keysets bucket does not exist")
@@ -182,6 +182,8 @@ func (k *KeysetStore) WriteKeysetAndMetadata(ctx context.Context, keysetName str
 
 		return nil
 	})
+
+	return err
 }
 
 // ForEachKeyset calls fn for each keyset name in the store.
@@ -215,6 +217,14 @@ func (k *KeysetStore) ForEachKeyset(ctx context.Context, fn func(keysetName stri
 	for _, key := range keys {
 		if err := fn(key); err != nil {
 			return err
+		}
+
+		result, err := k.ReadKeysetAndMetadata(ctx, key)
+		if err != nil {
+			continue
+		}
+		if result.Handle != nil && result.Metadata != nil {
+			reportKeysetMetrics(key, result.Handle, result.Metadata)
 		}
 	}
 

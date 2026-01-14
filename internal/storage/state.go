@@ -102,6 +102,9 @@ func NewState(path string) (*State, error) {
 	s.dynamicClientStore = &DynamicClientStore{dbAccessor: &dbAccessor{st: s}}
 	s.keysetStore = &KeysetStore{dbAccessor: &dbAccessor{st: s}}
 
+	// Report initial file size metric
+	reportStateFileSize(path)
+
 	return s, nil
 }
 
@@ -275,6 +278,10 @@ func (s *State) runCompactor(log *slog.Logger) error {
 
 	s.db = db
 	log.Info("compaction complete", "path", path, "size_before", formatBytes(sizeBefore), "size_after", formatBytes(sizeAfter))
+
+	// Update file size metric after compaction
+	reportStateFileSize(path)
+
 	return nil
 }
 

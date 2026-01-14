@@ -12,6 +12,7 @@ import (
 	"lds.li/oauth2ext/oauth2as/discovery"
 	"lds.li/passidp/internal/auth"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/ratelimit"
 	"lds.li/web"
 	"lds.li/web/httperror"
 )
@@ -38,10 +39,15 @@ type Server struct {
 }
 
 func (s *Server) AddHandlers(r *web.Server) {
-	r.Handle("GET /authorization", web.BrowserHandlerFunc(s.HandleAuthorizationRequest), auth.SkipAuthn)
-	r.Handle("GET /resumeAuthorization", web.BrowserHandlerFunc(s.HandleAuthorizationRequestReturn), auth.SkipAuthn)
+	rl := &ratelimit.Middleware{
+		Rate:  s.Config.Serving.AuthLimitRate,
+		Burst: s.Config.Serving.AuthLimitBucket,
+	}
 
-	r.Handle("POST /token", http.HandlerFunc(s.OAuth2AS.TokenHandler), auth.SkipAuthn)
+	r.Handle("GET /authorization", rl.Wrap(web.BrowserHandlerFunc(s.HandleAuthorizationRequest)), auth.SkipAuthn)
+	r.Handle("GET /resumeAuthorization", rl.Wrap(web.BrowserHandlerFunc(s.HandleAuthorizationRequestReturn)), auth.SkipAuthn)
+
+	r.Handle("POST /token", rl.Wrap(http.HandlerFunc(s.OAuth2AS.TokenHandler)), auth.SkipAuthn)
 	r.Handle("GET /userinfo", http.HandlerFunc(s.OAuth2AS.UserinfoHandler), auth.SkipAuthn)
 	r.Handle("GET /.well-known/openid-configuration", s.Discovery, auth.SkipAuthn)
 	r.Handle("GET /.well-known/jwks.json", s.Discovery, auth.SkipAuthn)

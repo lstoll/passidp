@@ -20,5 +20,9 @@
                 "http://127.0.0.1/callback",
             ],
         },
-    ]
+    ],
+    "serving": {
+        "authLimitRate": 100.0,
+        "authLimitBucket": 1000
+    }
 }

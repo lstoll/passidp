@@ -17,6 +17,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/ratelimit"
 	"lds.li/passidp/internal/storage"
 	"lds.li/passidp/internal/webcommon"
 	"lds.li/web"
@@ -45,10 +46,15 @@ type Authenticator struct {
 }
 
 func (a *Authenticator) AddHandlers(r *web.Server) {
+	rl := &ratelimit.Middleware{
+		Rate:  a.Config.Serving.AuthLimitRate,
+		Burst: a.Config.Serving.AuthLimitBucket,
+	}
+
 	r.Handle("GET /{$}", a.Middleware(web.BrowserHandlerFunc(a.HandleIndex)))
-	r.Handle("GET /login", web.BrowserHandlerFunc(a.HandleLoginPage), SkipAuthn)
+	r.Handle("GET /login", rl.Wrap(web.BrowserHandlerFunc(a.HandleLoginPage)), SkipAuthn)
 	r.Handle("GET /logout", web.BrowserHandlerFunc(a.Logout), SkipAuthn)
-	r.Handle("POST /finishWebauthnLogin", web.BrowserHandlerFunc(a.DoLogin), SkipAuthn)
+	r.Handle("POST /finishWebauthnLogin", rl.Wrap(web.BrowserHandlerFunc(a.DoLogin)), SkipAuthn)
 
 	// Grant management API
 	r.Handle("GET /api/grants", a.Middleware(web.BrowserHandlerFunc(a.HandleListGrants)))

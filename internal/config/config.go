@@ -15,6 +15,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/google/uuid"
 	"github.com/tailscale/hujson"
+	"golang.org/x/time/rate"
 	"sigs.k8s.io/yaml"
 )
 
@@ -46,6 +47,17 @@ type Config struct {
 	DPoPRefreshValidity string `json:"dpop_refresh_validity,omitempty"`
 	// ParsedDPoPRefreshValidity is the parsed DPoP refresh validity.
 	ParsedDPoPRefreshValidity time.Duration `json:"-"`
+
+	// Serving contains configuration for serving the OIDC server.
+	Serving ServingConfig `json:"serving,omitempty"`
+}
+
+// ServingConfig contains configuration for serving the OIDC server.
+type ServingConfig struct {
+	// AuthLimitRate is the rate limit for authentication endpoints in requests per second. Defaults to 0.5.
+	AuthLimitRate rate.Limit `json:"authLimitRate,omitempty"`
+	// AuthLimitBucket is the burst size for authentication endpoints. Defaults to 4.
+	AuthLimitBucket int `json:"authLimitBucket,omitempty"`
 }
 
 // ParseConfig parses the config from the given file, expanding environment
@@ -90,6 +102,12 @@ func (c *Config) SetDefaults() error {
 	}
 	if c.DPoPRefreshValidity == "" {
 		c.DPoPRefreshValidity = "24h"
+	}
+	if c.Serving.AuthLimitRate == 0 {
+		c.Serving.AuthLimitRate = rate.Limit(0.5)
+	}
+	if c.Serving.AuthLimitBucket == 0 {
+		c.Serving.AuthLimitBucket = 4
 	}
 	return nil
 }
@@ -188,6 +206,13 @@ func (c *Config) Validate() error {
 		if u.WebauthnHandle == u.ID {
 			validErr = errors.Join(validErr, fmt.Errorf("user %s webauthn handle must be a different UUID than the user ID", u.ID))
 		}
+	}
+
+	if c.Serving.AuthLimitRate < 0 {
+		validErr = errors.Join(validErr, fmt.Errorf("authLimitRate must be non-negative, got: %f", float64(c.Serving.AuthLimitRate)))
+	}
+	if c.Serving.AuthLimitBucket < 0 {
+		validErr = errors.Join(validErr, fmt.Errorf("authLimitBucket must be non-negative, got: %d", c.Serving.AuthLimitBucket))
 	}
 
 	return validErr

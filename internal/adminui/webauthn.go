@@ -86,6 +86,11 @@ func (w *WebAuthnManager) registration(ctx context.Context, rw web.ResponseWrite
 			return fmt.Errorf("enrollment user_id mismatch")
 		}
 
+		// Check if enrollment already has a credential registered
+		if enrollment.CredentialData != nil {
+			return fmt.Errorf("enrollment already completed - a passkey has already been registered for this enrollment")
+		}
+
 		sess := session.MustFromContext(ctx)
 		sess.Set(pendingWebauthnEnrollmentSessionKey, &pendingWebauthnEnrollment{
 			ForUserID:    uid,
@@ -98,6 +103,17 @@ func (w *WebAuthnManager) registration(ctx context.Context, rw web.ResponseWrite
 	pwe, ok := sess.Get(pendingWebauthnEnrollmentSessionKey).(*pendingWebauthnEnrollment)
 	if !ok || pwe.ForUserID == "" {
 		return fmt.Errorf("no enroll to user id set in session")
+	}
+
+	// Check if enrollment already has a credential registered (for session-based access)
+	if pwe.EnrollmentID != "" {
+		enrollmentID, err := uuid.Parse(pwe.EnrollmentID)
+		if err == nil {
+			enrollment, err := w.state.PendingEnrollments().GetPendingEnrollmentByID(enrollmentID)
+			if err == nil && enrollment.CredentialData != nil {
+				return fmt.Errorf("enrollment already completed - a passkey has already been registered for this enrollment")
+			}
+		}
 	}
 
 	user, err := w.config.Users.GetUserByStringID(pwe.ForUserID)
@@ -126,6 +142,17 @@ func (w *WebAuthnManager) beginRegistration(ctx context.Context, rw web.Response
 	pwe, ok := sess.Get(pendingWebauthnEnrollmentSessionKey).(*pendingWebauthnEnrollment)
 	if !ok || pwe.ForUserID == "" {
 		return fmt.Errorf("no enroll to user id set in session")
+	}
+
+	// Check if enrollment already has a credential registered
+	if pwe.EnrollmentID != "" {
+		enrollmentID, err := uuid.Parse(pwe.EnrollmentID)
+		if err == nil {
+			enrollment, err := w.state.PendingEnrollments().GetPendingEnrollmentByID(enrollmentID)
+			if err == nil && enrollment.CredentialData != nil {
+				return fmt.Errorf("enrollment already completed - a passkey has already been registered for this enrollment")
+			}
+		}
 	}
 
 	user, err := w.config.Users.GetUserByStringID(pwe.ForUserID)
@@ -220,6 +247,11 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 
 	if enrollment.UserID != userID {
 		return fmt.Errorf("enrollment user_id mismatch")
+	}
+
+	// Check if enrollment already has a credential registered
+	if enrollment.CredentialData != nil {
+		return fmt.Errorf("enrollment already completed - a passkey has already been registered for this enrollment")
 	}
 
 	// Generate confirmation key

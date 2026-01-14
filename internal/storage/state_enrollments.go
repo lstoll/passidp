@@ -185,6 +185,11 @@ func (p *PendingEnrollments) UpdatePendingEnrollment(enrollmentID uuid.UUID, cre
 			return fmt.Errorf("unmarshal enrollment: %w", err)
 		}
 
+		// Prevent re-registration: if a credential is already registered, reject the update
+		if enrollment.CredentialData != nil {
+			return fmt.Errorf("enrollment already completed - a passkey has already been registered for this enrollment")
+		}
+
 		enrollment.CredentialID = credentialID
 		enrollment.CredentialData = credentialData
 		enrollment.Name = name

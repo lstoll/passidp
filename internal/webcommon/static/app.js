@@ -335,17 +335,33 @@ class WebAuthnUI {
             if (responseData.success) {
                 // Build success message
                 let successMsg = responseData.message || "Passkey registered successfully!";
-                
+
                 // If there's a confirmation key, show it in the dedicated box
                 if (responseData.confirmation_key) {
                     const confBox = document.getElementById('confirmation-box');
                     const confKeyVal = document.getElementById('confirmation-key-value');
                     const enrollIdVal = document.getElementById('enrollment-id-value');
-                    
+
                     if (confBox && confKeyVal) {
                         confKeyVal.textContent = responseData.confirmation_key;
                         if (enrollIdVal) enrollIdVal.textContent = responseData.enrollment_id || 'N/A';
                         confBox.style.display = 'block';
+
+                        // Hide the registration form since registration is complete
+                        const registrationForm = document.getElementById('registration-form');
+                        if (registrationForm) {
+                            registrationForm.style.display = 'none';
+                        }
+
+                        // Update the card title and subtitle to reflect completion
+                        const titleElement = document.querySelector('.title');
+                        const subtitleElement = document.querySelector('.subtitle');
+                        if (titleElement) {
+                            titleElement.textContent = 'Passkey Registered';
+                        }
+                        if (subtitleElement) {
+                            subtitleElement.textContent = 'Registration pending administrator confirmation';
+                        }
                     }
                 }
 
@@ -356,7 +372,7 @@ class WebAuthnUI {
                 if (responseData.enrollment_id) {
                     document.body.dataset.enrollmentId = responseData.enrollment_id;
                 }
-                
+
                 // Show success message, auto-hide it as requested
                 this.showSuccess(successMsg, true);
 
@@ -542,7 +558,7 @@ class GrantManagerUI {
                 if (successEl) successEl.style.display = 'none';
             });
         }
-        
+
         // Revoke all button
         const revokeAllBtn = document.getElementById('revoke-all-btn');
         if (revokeAllBtn) {
@@ -600,7 +616,7 @@ class GrantManagerUI {
             const row = document.createElement('tr');
             const grantedDate = new Date(grant.granted_at).toLocaleString();
             const expiresDate = new Date(grant.expires_at).toLocaleString();
-            
+
             row.innerHTML = `
                 <td class="pl-5">${this.escapeHtml(grant.client_id)}</td>
                 <td>${grantedDate}</td>

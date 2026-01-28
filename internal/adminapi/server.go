@@ -64,6 +64,9 @@ func (s *Server) Start(ctx context.Context, g *run.Group) error {
 	mux.HandleFunc("POST /admin/enrollments/confirm", s.handleConfirmEnrollment)
 	mux.HandleFunc("GET /admin/credentials", s.handleListCredentials)
 	mux.HandleFunc("DELETE /admin/credentials/", s.handleDeleteCredential)
+	mux.HandleFunc("GET /admin/boltdb/buckets", s.handleListBuckets)
+	mux.HandleFunc("GET /admin/boltdb/buckets/", s.handleListBucketContents)
+	mux.HandleFunc("DELETE /admin/boltdb/buckets/", s.handleDeleteBucketContents)
 
 	server := &http.Server{
 		Handler:           mux,
@@ -288,6 +291,85 @@ func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) 
 
 	if !found {
 		http.Error(w, "credential not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListBuckets lists all BoltDB buckets.
+func (s *Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
+	buckets, err := s.state.ListBuckets()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("list buckets: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	enc := json.NewEncoder(w)
+	flusher, hasFlusher := w.(http.Flusher)
+	for _, bucket := range buckets {
+		if err := enc.Encode(map[string]string{"bucket": bucket}); err != nil {
+			slog.Error("encode bucket", slog.String("error", err.Error()))
+			return
+		}
+		if hasFlusher {
+			flusher.Flush()
+		}
+	}
+}
+
+// handleListBucketContents lists all entries in a specific bucket, streaming them.
+func (s *Server) handleListBucketContents(w http.ResponseWriter, r *http.Request) {
+	// Extract bucket name from path
+	path := r.URL.Path
+	prefix := "/admin/boltdb/buckets/"
+	bucketName, ok := strings.CutPrefix(path, prefix)
+	if !ok || bucketName == "" {
+		http.Error(w, "bucket name required", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	enc := json.NewEncoder(w)
+	err := s.state.ListBucketContents(bucketName, func(entry storage.BucketEntry) error {
+		if err := enc.Encode(entry); err != nil {
+			return fmt.Errorf("encode entry: %w", err)
+		}
+		flusher.Flush()
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("list bucket contents: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleDeleteBucketContents deletes all contents from a specific bucket.
+func (s *Server) handleDeleteBucketContents(w http.ResponseWriter, r *http.Request) {
+	// Extract bucket name from path
+	path := r.URL.Path
+	prefix := "/admin/boltdb/buckets/"
+	bucketName, ok := strings.CutPrefix(path, prefix)
+	if !ok || bucketName == "" {
+		http.Error(w, "bucket name required", http.StatusBadRequest)
+		return
+	}
+
+	err := s.state.DeleteBucketContents(bucketName)
+	if err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			http.Error(w, fmt.Sprintf("bucket not found: %v", err), http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf("delete bucket contents: %v", err), http.StatusInternalServerError)
 		return
 	}
 

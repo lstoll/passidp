@@ -7,8 +7,9 @@ go.work*
 /dev-key.pem
 
 # for local/direct deploys
-fly.toml
-Dockerfile.fly
+/fly*
+Dockerfile.fly*
 /config.fly.*
 
 /.cursor
+/passidp

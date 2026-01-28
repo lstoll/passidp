@@ -57,6 +57,7 @@ var rootCmd = struct {
 	ConfirmCredential admincli.ConfirmCredentialCmd `cmd:"" help:"Confirm a pending credential enrollment."`
 	ListCredentials   admincli.ListCredentialsCmd   `cmd:"" help:"List all credentials."`
 	DeleteCredential  admincli.DeleteCredentialCmd  `cmd:"" help:"Delete a credential."`
+	Bolt              admincli.BoltCmd              `cmd:"" help:"BoltDB management commands."`
 }{}
 
 func main() {

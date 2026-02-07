@@ -28,16 +28,32 @@ func (c *StaticClient) UseOverrideSubject() bool {
 	return c.configClient.UseOverrideSubject
 }
 
+func (c *StaticClient) GrantValidity() *time.Duration {
+	if c.configClient.GrantValidity != 0 {
+		return ptr(c.configClient.GrantValidity.Duration())
+	}
+	return nil
+}
+
 func (c *StaticClient) AccessIDTokenValidity() *time.Duration {
-	return c.configClient.ParsedTokenValidity
+	if c.configClient.TokenValidity != 0 {
+		return ptr(c.configClient.TokenValidity.Duration())
+	}
+	return nil
 }
 
 func (c *StaticClient) RefreshValidity() *time.Duration {
-	return c.configClient.ParsedRefreshValidity
+	if c.configClient.RefreshValidity != 0 {
+		return ptr(c.configClient.RefreshValidity.Duration())
+	}
+	return nil
 }
 
 func (c *StaticClient) DPoPRefreshValidity() *time.Duration {
-	return c.configClient.ParsedDPoPRefreshValidity
+	if c.configClient.DPoPRefreshValidity != 0 {
+		return ptr(c.configClient.DPoPRefreshValidity.Duration())
+	}
+	return nil
 }
 
 func (c *StaticClient) RequiredGroups() []string {

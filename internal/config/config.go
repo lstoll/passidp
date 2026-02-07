@@ -28,25 +28,27 @@ type Config struct {
 	Clients []Client `json:"clients,omitempty"`
 	// Users is a list of users for this issuer.
 	Users Users `json:"users,omitempty"`
-	// SessionDuration is the duration a session is valid for. Defaults to 1h.
-	SessionDuration string `json:"session_duration,omitempty"`
-	// ParsedSessionDuration is the parsed session duration.
-	ParsedSessionDuration time.Duration `json:"-"`
+	// SessionDuration is the duration a web login session is valid for.
+	// Defaults to 1h.
+	SessionDuration JSONDuration `json:"session_duration,omitempty"`
 
-	// TokenValidity is the duration a token is valid for. Defaults to 1h.
-	TokenValidity string `json:"token_validity,omitempty"`
-	// ParsedTokenValidity is the parsed token validity.
-	ParsedTokenValidity time.Duration `json:"-"`
+	// TokenValidity is the duration ID and access tokens are valid for.
+	// Defaults to 1h.
+	TokenValidity JSONDuration `json:"token_validity,omitempty"`
 
 	// RefreshValidity is the duration a refresh token is valid for. Defaults to 24h.
-	RefreshValidity string `json:"refresh_validity,omitempty"`
-	// ParsedRefreshValidity is the parsed refresh validity.
-	ParsedRefreshValidity time.Duration `json:"-"`
+	RefreshValidity JSONDuration `json:"refresh_validity,omitempty"`
 
 	// DPoPRefreshValidity is the duration a DPoP refresh token is valid for. Defaults to 24h.
-	DPoPRefreshValidity string `json:"dpop_refresh_validity,omitempty"`
-	// ParsedDPoPRefreshValidity is the parsed DPoP refresh validity.
-	ParsedDPoPRefreshValidity time.Duration `json:"-"`
+	DPoPRefreshValidity JSONDuration `json:"dpop_refresh_validity,omitempty"`
+
+	// GrantValidity is the duration grants are valid for. Defaults to 24h.
+	GrantValidity JSONDuration `json:"grant_validity,omitempty"`
+
+	// RefreshTokenRotationGracePeriod is the grace period for refreshing
+	// refresh tokens, during this time the old token can still be used to
+	// account for network issues etc.. Defaults to 1 minute.
+	RefreshTokenRotationGracePeriod JSONDuration `json:"refresh_token_rotation_grace_period,omitempty"`
 
 	// Serving contains configuration for serving the OIDC server.
 	Serving ServingConfig `json:"serving,omitempty"`
@@ -91,17 +93,23 @@ func ParseConfig(cfgFile kong.NamedFileContentFlag) (*Config, error) {
 }
 
 func (c *Config) SetDefaults() error {
-	if c.SessionDuration == "" {
-		c.SessionDuration = "1h"
+	if c.SessionDuration == 0 {
+		c.SessionDuration = JSONDuration(1 * time.Hour)
 	}
-	if c.TokenValidity == "" {
-		c.TokenValidity = "1h"
+	if c.TokenValidity == 0 {
+		c.TokenValidity = JSONDuration(1 * time.Hour)
 	}
-	if c.RefreshValidity == "" {
-		c.RefreshValidity = "24h"
+	if c.RefreshValidity == 0 {
+		c.RefreshValidity = JSONDuration(24 * time.Hour)
 	}
-	if c.DPoPRefreshValidity == "" {
-		c.DPoPRefreshValidity = "24h"
+	if c.DPoPRefreshValidity == 0 {
+		c.DPoPRefreshValidity = JSONDuration(24 * time.Hour)
+	}
+	if c.GrantValidity == 0 {
+		c.GrantValidity = JSONDuration(24 * time.Hour)
+	}
+	if c.RefreshTokenRotationGracePeriod == 0 {
+		c.RefreshTokenRotationGracePeriod = JSONDuration(1 * time.Minute)
 	}
 	if c.Serving.AuthLimitRate == 0 {
 		c.Serving.AuthLimitRate = rate.Limit(0.5)
@@ -115,38 +123,6 @@ func (c *Config) SetDefaults() error {
 func (c *Config) Validate() error {
 	var validErr error
 
-	if c.SessionDuration != "" {
-		d, err := time.ParseDuration(c.SessionDuration)
-		if err != nil {
-			validErr = errors.Join(validErr, fmt.Errorf("invalid session duration: %w", err))
-		}
-		c.ParsedSessionDuration = d
-	}
-
-	if c.TokenValidity != "" {
-		d, err := time.ParseDuration(c.TokenValidity)
-		if err != nil {
-			validErr = errors.Join(validErr, fmt.Errorf("invalid token validity: %w", err))
-		}
-		c.ParsedTokenValidity = d
-	}
-
-	if c.RefreshValidity != "" {
-		d, err := time.ParseDuration(c.RefreshValidity)
-		if err != nil {
-			validErr = errors.Join(validErr, fmt.Errorf("invalid refresh validity: %w", err))
-		}
-		c.ParsedRefreshValidity = d
-	}
-
-	if c.DPoPRefreshValidity != "" {
-		d, err := time.ParseDuration(c.DPoPRefreshValidity)
-		if err != nil {
-			validErr = errors.Join(validErr, fmt.Errorf("invalid dpop refresh validity: %w", err))
-		}
-		c.ParsedDPoPRefreshValidity = d
-	}
-
 	if c.Issuer == "" {
 		validErr = errors.Join(validErr, fmt.Errorf("issuer is required"))
 	} else {
@@ -157,7 +133,7 @@ func (c *Config) Validate() error {
 		c.ParsedIssuer = u
 	}
 
-	for ci, cl := range c.Clients {
+	for _, cl := range c.Clients {
 		if cl.ID == "" {
 			validErr = errors.Join(validErr, fmt.Errorf("client %s missing ID", cl.ID))
 		}
@@ -166,27 +142,6 @@ func (c *Config) Validate() error {
 		}
 		if len(cl.RedirectURLs) == 0 {
 			validErr = errors.Join(validErr, fmt.Errorf("client %s missing redirect URLs", cl.ID))
-		}
-		if cl.TokenValidity != "" {
-			tokenValidity, err := time.ParseDuration(cl.TokenValidity)
-			if err != nil {
-				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid token validity: %w", cl.ID, err))
-			}
-			c.Clients[ci].ParsedTokenValidity = &tokenValidity
-		}
-		if cl.RefreshValidity != "" {
-			refreshValidity, err := time.ParseDuration(cl.RefreshValidity)
-			if err != nil {
-				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid refresh validity: %w", cl.ID, err))
-			}
-			c.Clients[ci].ParsedRefreshValidity = &refreshValidity
-		}
-		if cl.DPoPRefreshValidity != "" {
-			dpopRefreshValidity, err := time.ParseDuration(cl.DPoPRefreshValidity)
-			if err != nil {
-				validErr = errors.Join(validErr, fmt.Errorf("client %s invalid dpop refresh validity: %w", cl.ID, err))
-			}
-			c.Clients[ci].ParsedDPoPRefreshValidity = &dpopRefreshValidity
 		}
 	}
 

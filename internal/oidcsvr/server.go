@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 	"lds.li/oauth2ext/oauth2as"
@@ -149,6 +151,12 @@ func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest,
 		// TODO - set scopes appropriately
 		GrantedScopes: request.Scopes,
 	}
+	if client.GrantValidity() != nil {
+		grant.ExpiresAt = time.Now().Add(*client.GrantValidity())
+	}
+
+	slog.InfoContext(ctx, "granting auth", "client-id", request.ClientID, "user-id", userID.String(), "scopes", request.Scopes, "grant-expires-at", grant.ExpiresAt)
+
 	redir, err := s.OAuth2AS.GrantAuth(ctx, grant)
 	if err != nil {
 		return "", fmt.Errorf("grant auth: %w", err)

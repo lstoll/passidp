@@ -1,7 +1,5 @@
 package config
 
-import "time"
-
 // Client represents an individual oauth2/oidc client.
 type Client struct {
 	// ID is the identifier for this client, corresponds to the client ID.
@@ -27,24 +25,18 @@ type Client struct {
 	// UseRS256 indicates that this client should use RS256 for tokens/userinfo,
 	// rather than defaulting to ES256
 	UseRS256 bool `json:"useRS256"`
+	// GrantValidity overrides the default validity time for grants.
+	GrantValidity JSONDuration `json:"grantValidity"`
 	// TokenValidity overrides the default valitity time for ID/access tokens.
 	// Go duration format.
-	TokenValidity string `json:"tokenValidity"`
+	TokenValidity JSONDuration `json:"tokenValidity"`
 	// RefreshValidity overrides the default validity time for refresh tokens.
 	// Go duration format. If 0, refresh tokens will not be issued.
-	RefreshValidity string `json:"refreshValidity,omitempty"`
+	RefreshValidity JSONDuration `json:"refreshValidity,omitempty"`
 	// DPoPRefreshValidity overrides the default validity time for refresh tokens
 	// when DPoP is used. Go duration format.
-	DPoPRefreshValidity string `json:"dpopRefreshValidity,omitempty"`
+	DPoPRefreshValidity JSONDuration `json:"dpopRefreshValidity,omitempty"`
 	// RequiredGroups is a list of group names that the user must be a member of
 	// to access this client. If empty, no group membership is required.
 	RequiredGroups []string `json:"requiredGroups"`
-
-	// ParsedTokenValidity is the parsed token validity time, this happens at
-	// validation time.
-	ParsedTokenValidity *time.Duration `json:"-"`
-	// ParsedRefreshValidity is the parsed refresh token validity time.
-	ParsedRefreshValidity *time.Duration `json:"-"`
-	// ParsedDPoPRefreshValidity is the parsed DPoP refresh token validity time.
-	ParsedDPoPRefreshValidity *time.Duration `json:"-"`
 }

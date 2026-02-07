@@ -73,7 +73,7 @@ func main() {
 
 	clictx := kong.Parse(
 		&rootCmd,
-		kong.Description("webauthn-oidc-idp is a webauthn/oidc identity provider"),
+		kong.Description("passidp is a webauthn/oidc identity provider"),
 		kong.Vars{"version": promversion.Version},
 	)
 

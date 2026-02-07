@@ -20,6 +20,8 @@ type Client interface {
 	// UseOverrideSubject indicates that this client should use the override
 	// subject for tokens/userinfo, if the user has one set.
 	UseOverrideSubject() bool
+	// GrantValidity returns the validity time for grants.
+	GrantValidity() *time.Duration
 	// AccessIDTokenValidity returns the validity time for access/ID tokens. If
 	// nil, the default validity time will be used.
 	AccessIDTokenValidity() *time.Duration
@@ -92,27 +94,20 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 
 	// Determine refresh token validity
 	var refreshValidity time.Duration
-	var refreshSet bool
 
 	if req.DPoPBound {
 		if v := cl.DPoPRefreshValidity(); v != nil {
 			refreshValidity = *v
-			refreshSet = true
 		} else {
-			refreshValidity = h.Config.ParsedDPoPRefreshValidity
-			refreshSet = true
+			refreshValidity = h.Config.DPoPRefreshValidity.Duration()
 		}
 	} else {
 		if v := cl.RefreshValidity(); v != nil {
 			refreshValidity = *v
-			refreshSet = true
-		} else {
-			refreshValidity = h.Config.ParsedRefreshValidity
-			refreshSet = true
 		}
 	}
 
-	if refreshSet && refreshValidity > 0 {
+	if refreshValidity > 0 {
 		resp.RefreshTokenValidUntil = time.Now().Add(refreshValidity)
 	}
 
@@ -120,8 +115,6 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 	var tokenValidity time.Duration
 	if v := cl.AccessIDTokenValidity(); v != nil {
 		tokenValidity = *v
-	} else {
-		tokenValidity = h.Config.ParsedTokenValidity
 	}
 
 	if tokenValidity > 0 {
@@ -129,7 +122,7 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		resp.IDTokenExpiry = time.Now().Add(tokenValidity)
 	}
 
-	slog.Info("token handler", "userID", userUUID.String(), "clientID", req.ClientID, "refreshRequested", req.IsRefresh, "refreshSet", refreshSet, "refreshValidity", refreshValidity, "tokenValidity", tokenValidity, "dpopBound", req.DPoPBound)
+	slog.Info("token handler", "userID", userUUID.String(), "clientID", req.ClientID, "refreshRequested", req.IsRefresh, "refreshValidity", refreshValidity, "tokenValidity", tokenValidity, "dpopBound", req.DPoPBound)
 
 	return resp, nil
 }

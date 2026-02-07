@@ -44,7 +44,7 @@ func TestWebauthnAuth(t *testing.T) {
 	auth := &Authenticator{
 		Webauthn:  wn,
 		CredStore: credStore,
-		Config:    &config.Config{ParsedSessionDuration: 1 * time.Hour},
+		Config:    &config.Config{SessionDuration: config.JSONDuration(1 * time.Hour)},
 	}
 
 	t.Run("login", func(t *testing.T) {

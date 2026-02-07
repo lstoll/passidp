@@ -20,7 +20,7 @@ require (
 	golang.org/x/term v0.38.0
 	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.11
-	lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282
+	lds.li/oauth2ext v0.3.1-0.20260207205415-3afa781f6f90
 	lds.li/tinkrotate v0.1.0
 	lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7
 	sigs.k8s.io/yaml v1.6.0
@@ -38,6 +38,7 @@ require (
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

@@ -243,7 +243,7 @@ func (a *Authenticator) DoLogin(ctx context.Context, w web.ResponseWriter, r *we
 	// we cast it back to our type to make sure we get the real ID, not the
 	// potentially legacy mapped ID.
 	as.LoggedinUserID = uuid.NullUUID{UUID: user.(*WebAuthnUser).user.ID, Valid: true}
-	as.ExpiresAt = time.Now().Add(a.Config.ParsedSessionDuration)
+	as.ExpiresAt = time.Now().Add(a.Config.SessionDuration.Duration())
 	r.Session().Set(authSessSessionKey, as)
 
 	// Return the flow's returnTo URL

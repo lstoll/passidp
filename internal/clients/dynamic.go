@@ -30,6 +30,10 @@ func (d *DynamicClient) UseOverrideSubject() bool {
 	return false
 }
 
+func (d *DynamicClient) GrantValidity() *time.Duration {
+	return nil
+}
+
 // AccessIDTokenValidity returns the validity time for access/ID tokens. If
 // nil, the default validity time will be used.
 func (d *DynamicClient) AccessIDTokenValidity() *time.Duration {

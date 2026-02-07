@@ -113,8 +113,8 @@ gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntN
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
-lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282 h1:1XldHwcICtvaQ1ySbetdubxGZxQEkpDqsdARgWIltTQ=
-lds.li/oauth2ext v0.1.2-0.20260113180352-1c8946171282/go.mod h1:N3MY+0jF8HHHLGiLcK9uu+v1rbF+HHeQP62n6ZO+BEg=
+lds.li/oauth2ext v0.3.1-0.20260207205415-3afa781f6f90 h1:yOx9pZlx62VJJMIh0JzFlD+wcSu8W6TUde+qrN2wjCY=
+lds.li/oauth2ext v0.3.1-0.20260207205415-3afa781f6f90/go.mod h1:N3MY+0jF8HHHLGiLcK9uu+v1rbF+HHeQP62n6ZO+BEg=
 lds.li/tinkrotate v0.1.0 h1:HV9O4ZDIJk0qjj+h8SRPUaIun150V5AzbgBW5MiN2TI=
 lds.li/tinkrotate v0.1.0/go.mod h1:IEnrfMJh6eXt4KkPtWqrakAfkSg/DcjEMOmROaLmVEs=
 lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7 h1:VkrXbeFmpT9H2BExLmfr1zPPJwjk/Y1DVAQL3CNbWvg=

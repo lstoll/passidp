@@ -239,6 +239,12 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		TokenHandler:    oidchHandlers.TokenHandler,
 		UserinfoHandler: oidchHandlers.UserinfoHandler,
 
+		AccessTokenValidity:             cfg.TokenValidity.Duration(),
+		IDTokenValidity:                 cfg.TokenValidity.Duration(),
+		RefreshTokenValidity:            cfg.RefreshValidity.Duration(),
+		GrantValidity:                   cfg.GrantValidity.Duration(),
+		RefreshTokenRotationGracePeriod: cfg.RefreshTokenRotationGracePeriod.Duration(),
+
 		Logger: slog.With("component", "oauth2as"),
 	}
 

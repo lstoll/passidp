@@ -76,12 +76,12 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	codeIDString := codeID.String()
-	if err := oauth2State.CreateAuthCode(ctx, "test_user", grantID, codeIDString, authCode); err != nil {
+	if err := oauth2State.CreateAuthCode(ctx, codeIDString, authCode); err != nil {
 		t.Fatalf("failed to create auth code: %v", err)
 	}
 
 	// 4. Test GetAuthCodeAndGrant
-	retrievedAC, retrievedGrant, err := oauth2State.GetAuthCodeAndGrant(ctx, "test_user", grantID, codeIDString)
+	retrievedAC, retrievedGrant, err := oauth2State.GetAuthCodeAndGrant(ctx, codeIDString)
 	if err != nil {
 		t.Fatalf("failed to get auth code and grant: %v", err)
 	}
@@ -112,12 +112,12 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	tokenIDString := tokenID.String()
-	if err := oauth2State.CreateRefreshToken(ctx, "test_user", grantID, tokenIDString, refreshToken); err != nil {
+	if err := oauth2State.CreateRefreshToken(ctx, tokenIDString, refreshToken); err != nil {
 		t.Fatalf("failed to create refresh token: %v", err)
 	}
 
 	// 6. Test GetRefreshTokenAndGrant
-	retrievedRT, retrievedGrantRT, err := oauth2State.GetRefreshTokenAndGrant(ctx, "test_user", grantID, tokenIDString)
+	retrievedRT, retrievedGrantRT, err := oauth2State.GetRefreshTokenAndGrant(ctx, tokenIDString)
 	if err != nil {
 		t.Fatalf("failed to get refresh token and grant: %v", err)
 	}
@@ -154,10 +154,10 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// 8. Test Expire Auth Code
-	if err := oauth2State.ExpireAuthCode(ctx, "test_user", grantID, codeIDString); err != nil {
+	if err := oauth2State.ExpireAuthCode(ctx, codeIDString); err != nil {
 		t.Fatalf("failed to expire auth code: %v", err)
 	}
-	ac, g, err := oauth2State.GetAuthCodeAndGrant(ctx, "test_user", grantID, codeIDString)
+	ac, g, err := oauth2State.GetAuthCodeAndGrant(ctx, codeIDString)
 	if err != oauth2as.ErrNotFound {
 		t.Fatalf("expected ErrNotFound when getting expired auth code, got: %v", err)
 	}
@@ -166,23 +166,16 @@ func TestStateOAuth2Storage(t *testing.T) {
 	}
 
 	// 9. Test Expire Grant
-	// Note: ExpireGrant sets expiry to now, does not delete
 	if err := oauth2State.ExpireGrant(ctx, grantID); err != nil {
 		t.Fatalf("failed to expire grant: %v", err)
 	}
 
 	expiredGrant, err := oauth2State.GetGrant(ctx, grantID)
-	if err != nil {
-		t.Fatalf("failed to get expired grant: %v", err)
+	if err != oauth2as.ErrNotFound {
+		t.Fatalf("expected ErrNotFound when getting expired grant, got err=%v grant=%v", err, expiredGrant)
 	}
-	// Depending on implementation, it might still return the grant but with ExpiresAt updated
-	if expiredGrant == nil {
-		// If implementation hides expired grants, this is fine too, but current impl returns it
-	} else {
-		// Verify expiry is recent
-		if time.Since(expiredGrant.ExpiresAt) > time.Minute {
-			t.Errorf("expected expiry to be roughly now, got %v", expiredGrant.ExpiresAt)
-		}
+	if expiredGrant != nil {
+		t.Error("expected nil grant when expired")
 	}
 
 	// 10. List Active Grants
@@ -216,7 +209,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 		ValidUntil:       time.Now().Add(time.Hour),
 		StorageExpiresAt: time.Now().Add(24 * time.Hour),
 	}
-	if err := oauth2State.CreateRefreshToken(ctx, "test_user", newGrantID, newTokenID.String(), newRT); err != nil {
+	if err := oauth2State.CreateRefreshToken(ctx, newTokenID.String(), newRT); err != nil {
 		t.Fatalf("failed to create refresh token for second grant: %v", err)
 	}
 
@@ -227,4 +220,14 @@ func TestStateOAuth2Storage(t *testing.T) {
 	if len(activeGrants) != 1 {
 		t.Errorf("expected 1 active grant, got %d", len(activeGrants))
 	}
+}
+
+func TestOauth2ASStorage(t *testing.T) {
+	oauth2as.TestStorage(t, func() oauth2as.Storage {
+		storage, err := NewState(t.TempDir() + "/state.bolt")
+		if err != nil {
+			t.Fatalf("failed to create state: %v", err)
+		}
+		return storage.OAuth2State()
+	})
 }

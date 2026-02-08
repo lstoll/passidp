@@ -15,6 +15,7 @@ var expectedBuckets = map[string]bool{
 	bucketGrants:             true,
 	bucketAuthCodes:          true,
 	bucketRefreshTokens:      true,
+	bucketUserRefreshTokens:  true,
 	bucketKeysets:            true,
 	bucketSessions:           true,
 	bucketDynamicClients:     true,
@@ -172,13 +173,14 @@ func (s *State) runGC() {
 		log.Info("garbage collected pending enrollments", slog.Int("deleted", deleted))
 	}
 
-	authCodesDeleted, refreshTokensDeleted, grantsDeleted, err := s.oauth2State.GarbageCollect()
+	authCodesDeleted, refreshTokensDeleted, userRefreshTokensDeleted, grantsDeleted, err := s.oauth2State.GarbageCollect()
 	if err != nil {
 		log.Error("garbage collect oauth2 state", slog.String("error", err.Error()))
 	} else if authCodesDeleted > 0 || refreshTokensDeleted > 0 || grantsDeleted > 0 {
 		log.Info("garbage collected oauth2 state",
 			slog.Int("auth_codes_deleted", authCodesDeleted),
 			slog.Int("refresh_tokens_deleted", refreshTokensDeleted),
+			slog.Int("user_refresh_tokens_deleted", userRefreshTokensDeleted),
 			slog.Int("grants_deleted", grantsDeleted))
 	}
 

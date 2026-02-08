@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,9 +16,10 @@ import (
 
 const (
 	// Bucket names for OAuth2 grant storage
-	bucketGrants        = "grants"
-	bucketAuthCodes     = "auth_codes"
-	bucketRefreshTokens = "refresh_tokens"
+	bucketGrants            = "grants"
+	bucketAuthCodes         = "auth_codes"
+	bucketRefreshTokens     = "refresh_tokens"
+	bucketUserRefreshTokens = "user_refresh_tokens"
 
 	// oauth2GrantRetentionPeriod is how long to keep expired grants for audit purposes
 	oauth2GrantRetentionPeriod = 365 * 24 * time.Hour // 1 year
@@ -150,48 +152,47 @@ func (o *OAuth2State) GetGrant(ctx context.Context, id string) (*oauth2as.Stored
 	defer release()
 
 	var grant *oauth2as.StoredGrant
-
-	if err := db.View(func(tx *bolt.Tx) error {
-		grantsBucket := tx.Bucket([]byte(bucketGrants))
-		if grantsBucket == nil {
-			return oauth2as.ErrNotFound
-		}
-
-		grantData := grantsBucket.Get([]byte(id))
-		if grantData == nil {
-			return oauth2as.ErrNotFound
-		}
-
-		var g oauth2as.StoredGrant
-		if err := json.Unmarshal(grantData, &g); err != nil {
-			return fmt.Errorf("unmarshal grant: %w", err)
-		}
-
-		grant = &g
-		return nil
-	}); err != nil {
+	err := db.View(func(tx *bolt.Tx) error {
+		var err error
+		grant, err = o.getGrantInTx(tx, id)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
-
 	return grant, nil
 }
 
+func (o *OAuth2State) getGrantInTx(tx *bolt.Tx, id string) (*oauth2as.StoredGrant, error) {
+	grantsBucket := tx.Bucket([]byte(bucketGrants))
+	if grantsBucket == nil {
+		return nil, oauth2as.ErrNotFound
+	}
+
+	grantData := grantsBucket.Get([]byte(id))
+	if grantData == nil {
+		return nil, oauth2as.ErrNotFound
+	}
+
+	var g oauth2as.StoredGrant
+	if err := json.Unmarshal(grantData, &g); err != nil {
+		return nil, fmt.Errorf("unmarshal grant: %w", err)
+	}
+
+	if time.Now().After(g.ExpiresAt) {
+		return nil, oauth2as.ErrNotFound
+	}
+
+	return &g, nil
+}
+
 // CreateAuthCode creates a new authorization code associated with a grant.
-func (o *OAuth2State) CreateAuthCode(ctx context.Context, userID, grantID, codeID string, code *oauth2as.StoredAuthCode) error {
+func (o *OAuth2State) CreateAuthCode(ctx context.Context, codeID string, code *oauth2as.StoredAuthCode) error {
 	db, release := o.dbAccessor.db()
 	defer release()
 
 	// Initialize version for optimistic locking
 	code.Version = 1
-
-	key, err := (&authCodeKey{
-		userID:  userID,
-		grantID: grantID,
-		codeID:  codeID,
-	}).key()
-	if err != nil {
-		return fmt.Errorf("error constructing auth code key: %w", err)
-	}
 
 	return db.Update(func(tx *bolt.Tx) error {
 		authCodesBucket := tx.Bucket([]byte(bucketAuthCodes))
@@ -204,7 +205,7 @@ func (o *OAuth2State) CreateAuthCode(ctx context.Context, userID, grantID, codeI
 			return fmt.Errorf("marshal auth code: %w", err)
 		}
 
-		if err := authCodesBucket.Put(key, data); err != nil {
+		if err := authCodesBucket.Put([]byte(codeID), data); err != nil {
 			return fmt.Errorf("store auth code: %w", err)
 		}
 		return nil
@@ -212,18 +213,9 @@ func (o *OAuth2State) CreateAuthCode(ctx context.Context, userID, grantID, codeI
 }
 
 // ExpireAuthCode expires an authorization code (deletes it).
-func (o *OAuth2State) ExpireAuthCode(ctx context.Context, userID, grantID, codeID string) error {
+func (o *OAuth2State) ExpireAuthCode(ctx context.Context, codeID string) error {
 	db, release := o.dbAccessor.db()
 	defer release()
-
-	key, err := (&authCodeKey{
-		userID:  userID,
-		grantID: grantID,
-		codeID:  codeID,
-	}).key()
-	if err != nil {
-		return fmt.Errorf("error constructing auth code key: %w", err)
-	}
 
 	return db.Update(func(tx *bolt.Tx) error {
 		authCodesBucket := tx.Bucket([]byte(bucketAuthCodes))
@@ -231,11 +223,11 @@ func (o *OAuth2State) ExpireAuthCode(ctx context.Context, userID, grantID, codeI
 			return oauth2as.ErrNotFound
 		}
 
-		if authCodesBucket.Get(key) == nil {
+		if authCodesBucket.Get([]byte(codeID)) == nil {
 			return oauth2as.ErrNotFound
 		}
 
-		if err := authCodesBucket.Delete(key); err != nil {
+		if err := authCodesBucket.Delete([]byte(codeID)); err != nil {
 			return fmt.Errorf("delete auth code: %w", err)
 		}
 		return nil
@@ -243,23 +235,14 @@ func (o *OAuth2State) ExpireAuthCode(ctx context.Context, userID, grantID, codeI
 }
 
 // GetAuthCodeAndGrant retrieves an auth code and its associated grant.
-func (o *OAuth2State) GetAuthCodeAndGrant(ctx context.Context, userID, grantID, codeID string) (*oauth2as.StoredAuthCode, *oauth2as.StoredGrant, error) {
+func (o *OAuth2State) GetAuthCodeAndGrant(ctx context.Context, codeID string) (*oauth2as.StoredAuthCode, *oauth2as.StoredGrant, error) {
 	db, release := o.dbAccessor.db()
 	defer release()
-
-	key, err := (&authCodeKey{
-		userID:  userID,
-		grantID: grantID,
-		codeID:  codeID,
-	}).key()
-	if err != nil {
-		return nil, nil, fmt.Errorf("error constructing auth code key: %w", err)
-	}
 
 	var authCode *oauth2as.StoredAuthCode
 	var grant *oauth2as.StoredGrant
 
-	err = db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		authCodesBucket := tx.Bucket([]byte(bucketAuthCodes))
 		if authCodesBucket == nil {
 			return oauth2as.ErrNotFound
@@ -270,7 +253,7 @@ func (o *OAuth2State) GetAuthCodeAndGrant(ctx context.Context, userID, grantID, 
 		}
 
 		// Get Auth Code
-		acData := authCodesBucket.Get(key)
+		acData := authCodesBucket.Get([]byte(codeID))
 		if acData == nil {
 			return oauth2as.ErrNotFound
 		}
@@ -279,18 +262,13 @@ func (o *OAuth2State) GetAuthCodeAndGrant(ctx context.Context, userID, grantID, 
 			return fmt.Errorf("unmarshal auth code: %w", err)
 		}
 
-		grantData := grantsBucket.Get([]byte(grantID))
-		if grantData == nil {
-			// Inconsistent state: auth code exists but grant doesn't
-			return oauth2as.ErrNotFound
-		}
-		var g oauth2as.StoredGrant
-		if err := json.Unmarshal(grantData, &g); err != nil {
-			return fmt.Errorf("unmarshal grant: %w", err)
+		g, err := o.getGrantInTx(tx, ac.GrantID)
+		if err != nil {
+			return err
 		}
 
 		authCode = &ac
-		grant = &g
+		grant = g
 		return nil
 	})
 
@@ -302,26 +280,26 @@ func (o *OAuth2State) GetAuthCodeAndGrant(ctx context.Context, userID, grantID, 
 }
 
 // CreateRefreshToken creates a new refresh token associated with a grant.
-func (o *OAuth2State) CreateRefreshToken(ctx context.Context, userID, grantID, tokenID string, token *oauth2as.StoredRefreshToken) error {
+func (o *OAuth2State) CreateRefreshToken(ctx context.Context, tokenID string, token *oauth2as.StoredRefreshToken) error {
 	db, release := o.dbAccessor.db()
 	defer release()
 
 	// Initialize version for optimistic locking
 	token.Version = 1
 
-	key, err := (&refreshTokenKey{
-		userID:  userID,
-		grantID: grantID,
-		tokenID: tokenID,
-	}).key()
-	if err != nil {
-		return fmt.Errorf("error constructing refresh token key: %w", err)
-	}
-
 	return db.Update(func(tx *bolt.Tx) error {
 		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
 		if refreshTokensBucket == nil {
 			return fmt.Errorf("refresh tokens bucket does not exist")
+		}
+		userRefreshTokensBucket := tx.Bucket([]byte(bucketUserRefreshTokens))
+		if userRefreshTokensBucket == nil {
+			return fmt.Errorf("user refresh tokens bucket does not exist")
+		}
+
+		grant, err := o.getGrantInTx(tx, token.GrantID)
+		if err != nil {
+			return err
 		}
 
 		data, err := json.Marshal(token)
@@ -329,8 +307,12 @@ func (o *OAuth2State) CreateRefreshToken(ctx context.Context, userID, grantID, t
 			return fmt.Errorf("marshal refresh token: %w", err)
 		}
 
-		if err := refreshTokensBucket.Put(key, data); err != nil {
+		if err := refreshTokensBucket.Put([]byte(tokenID), data); err != nil {
 			return fmt.Errorf("store refresh token: %w", err)
+		}
+
+		if err := userRefreshTokensBucket.Put([]byte(fmt.Sprintf("%s/%s", grant.UserID, tokenID)), data); err != nil {
+			return fmt.Errorf("store user refresh token: %w", err)
 		}
 
 		return nil
@@ -338,18 +320,9 @@ func (o *OAuth2State) CreateRefreshToken(ctx context.Context, userID, grantID, t
 }
 
 // UpdateRefreshToken updates an existing refresh token.
-func (o *OAuth2State) UpdateRefreshToken(ctx context.Context, userID, grantID, tokenID string, token *oauth2as.StoredRefreshToken) error {
+func (o *OAuth2State) UpdateRefreshToken(ctx context.Context, tokenID string, token *oauth2as.StoredRefreshToken) error {
 	db, release := o.dbAccessor.db()
 	defer release()
-
-	key, err := (&refreshTokenKey{
-		userID:  userID,
-		grantID: grantID,
-		tokenID: tokenID,
-	}).key()
-	if err != nil {
-		return oauth2as.ErrNotFound
-	}
 
 	return db.Update(func(tx *bolt.Tx) error {
 		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
@@ -357,8 +330,7 @@ func (o *OAuth2State) UpdateRefreshToken(ctx context.Context, userID, grantID, t
 			return fmt.Errorf("refresh tokens bucket does not exist")
 		}
 
-		// Get existing token for optimistic locking
-		existingData := refreshTokensBucket.Get(key)
+		existingData := refreshTokensBucket.Get([]byte(tokenID))
 		if existingData == nil {
 			return oauth2as.ErrNotFound
 		}
@@ -368,12 +340,10 @@ func (o *OAuth2State) UpdateRefreshToken(ctx context.Context, userID, grantID, t
 			return fmt.Errorf("unmarshal existing refresh token: %w", err)
 		}
 
-		// Optimistic locking: check version matches
 		if existing.Version != token.Version {
 			return oauth2as.ErrConcurrentUpdate
 		}
 
-		// Increment version
 		token.Version = existing.Version + 1
 
 		data, err := json.Marshal(token)
@@ -381,7 +351,7 @@ func (o *OAuth2State) UpdateRefreshToken(ctx context.Context, userID, grantID, t
 			return fmt.Errorf("marshal refresh token: %w", err)
 		}
 
-		if err := refreshTokensBucket.Put(key, data); err != nil {
+		if err := refreshTokensBucket.Put([]byte(tokenID), data); err != nil {
 			return fmt.Errorf("update refresh token: %w", err)
 		}
 		return nil
@@ -389,30 +359,40 @@ func (o *OAuth2State) UpdateRefreshToken(ctx context.Context, userID, grantID, t
 }
 
 // ExpireRefreshToken expires a refresh token (deletes it).
-func (o *OAuth2State) ExpireRefreshToken(ctx context.Context, userID, grantID, tokenID string) error {
+func (o *OAuth2State) ExpireRefreshToken(ctx context.Context, tokenID string) error {
 	db, release := o.dbAccessor.db()
 	defer release()
-
-	key, err := (&refreshTokenKey{
-		userID:  userID,
-		grantID: grantID,
-		tokenID: tokenID,
-	}).key()
-	if err != nil {
-		return oauth2as.ErrNotFound
-	}
 
 	return db.Update(func(tx *bolt.Tx) error {
 		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
 		if refreshTokensBucket == nil {
 			return oauth2as.ErrNotFound
 		}
-
-		if refreshTokensBucket.Get(key) == nil {
+		userRefreshTokensBucket := tx.Bucket([]byte(bucketUserRefreshTokens))
+		if userRefreshTokensBucket == nil {
 			return oauth2as.ErrNotFound
 		}
 
-		if err := refreshTokensBucket.Delete(key); err != nil {
+		existingData := refreshTokensBucket.Get([]byte(tokenID))
+		if existingData == nil {
+			return oauth2as.ErrNotFound
+		}
+
+		var existing oauth2as.StoredRefreshToken
+		if err := json.Unmarshal(existingData, &existing); err != nil {
+			return fmt.Errorf("unmarshal existing refresh token: %w", err)
+		}
+
+		grant, err := o.getGrantInTx(tx, existing.GrantID)
+		if err != nil {
+			return err
+		}
+
+		if err := userRefreshTokensBucket.Delete([]byte(fmt.Sprintf("%s/%s", grant.UserID, tokenID))); err != nil {
+			return fmt.Errorf("delete user refresh token: %w", err)
+		}
+
+		if err := refreshTokensBucket.Delete([]byte(tokenID)); err != nil {
 			return fmt.Errorf("delete refresh token: %w", err)
 		}
 		return nil
@@ -420,23 +400,14 @@ func (o *OAuth2State) ExpireRefreshToken(ctx context.Context, userID, grantID, t
 }
 
 // GetRefreshTokenAndGrant retrieves a refresh token and its associated grant.
-func (o *OAuth2State) GetRefreshTokenAndGrant(ctx context.Context, userID, grantID, tokenID string) (*oauth2as.StoredRefreshToken, *oauth2as.StoredGrant, error) {
+func (o *OAuth2State) GetRefreshTokenAndGrant(ctx context.Context, tokenID string) (*oauth2as.StoredRefreshToken, *oauth2as.StoredGrant, error) {
 	db, release := o.dbAccessor.db()
 	defer release()
-
-	key, err := (&refreshTokenKey{
-		userID:  userID,
-		grantID: grantID,
-		tokenID: tokenID,
-	}).key()
-	if err != nil {
-		return nil, nil, oauth2as.ErrNotFound
-	}
 
 	var refreshToken *oauth2as.StoredRefreshToken
 	var grant *oauth2as.StoredGrant
 
-	err = db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
 		if refreshTokensBucket == nil {
 			return oauth2as.ErrNotFound
@@ -446,7 +417,7 @@ func (o *OAuth2State) GetRefreshTokenAndGrant(ctx context.Context, userID, grant
 			return oauth2as.ErrNotFound
 		}
 
-		rtData := refreshTokensBucket.Get(key)
+		rtData := refreshTokensBucket.Get([]byte(tokenID))
 		if rtData == nil {
 			return oauth2as.ErrNotFound
 		}
@@ -455,20 +426,15 @@ func (o *OAuth2State) GetRefreshTokenAndGrant(ctx context.Context, userID, grant
 			return fmt.Errorf("unmarshal refresh token: %w", err)
 		}
 
-		grantData := grantsBucket.Get([]byte(grantID))
-		if grantData == nil {
-			return oauth2as.ErrNotFound
-		}
-		var g oauth2as.StoredGrant
-		if err := json.Unmarshal(grantData, &g); err != nil {
-			return fmt.Errorf("unmarshal grant: %w", err)
+		g, err := o.getGrantInTx(tx, rt.GrantID)
+		if err != nil {
+			return err
 		}
 
 		refreshToken = &rt
-		grant = &g
+		grant = g
 		return nil
 	})
-
 	if err != nil {
 		return nil, nil, err
 	}
@@ -494,23 +460,33 @@ func (o *OAuth2State) ListActiveGrantsForUser(ctx context.Context, userID string
 	err := db.View(func(tx *bolt.Tx) error {
 		grantsBucket := tx.Bucket([]byte(bucketGrants))
 		if grantsBucket == nil {
-			return nil
+			return fmt.Errorf("grants bucket does not exist")
 		}
 		refreshTokensBucket := tx.Bucket([]byte(bucketRefreshTokens))
 		if refreshTokensBucket == nil {
-			return nil
+			return fmt.Errorf("refresh tokens bucket does not exist")
+		}
+		userRefreshTokensBucket := tx.Bucket([]byte(bucketUserRefreshTokens))
+		if userRefreshTokensBucket == nil {
+			return fmt.Errorf("user refresh tokens bucket does not exist")
 		}
 
 		now := time.Now()
 
-		prefix := []byte("u:" + userID + "/")
+		prefix := []byte(userID + "/")
 
-		c := refreshTokensBucket.Cursor()
+		c := userRefreshTokensBucket.Cursor()
 		activeGrantIDs := make(map[string]bool)
 
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			rtID := strings.TrimPrefix(string(k), userID+"/")
+			rtData := refreshTokensBucket.Get([]byte(rtID))
+			if rtData == nil {
+				continue
+			}
+
 			var rt oauth2as.StoredRefreshToken
-			if err := json.Unmarshal(v, &rt); err != nil {
+			if err := json.Unmarshal(rtData, &rt); err != nil {
 				continue
 			}
 
@@ -520,14 +496,13 @@ func (o *OAuth2State) ListActiveGrantsForUser(ctx context.Context, userID string
 		}
 
 		for grantID := range activeGrantIDs {
-			grantData := grantsBucket.Get([]byte(grantID))
-			if grantData == nil {
-				continue
-			}
-
-			var g oauth2as.StoredGrant
-			if err := json.Unmarshal(grantData, &g); err != nil {
-				continue
+			g, err := o.getGrantInTx(tx, grantID)
+			if err != nil {
+				// Grant may have been expired/deleted; skip orphaned tokens
+				if errors.Is(err, oauth2as.ErrNotFound) {
+					continue
+				}
+				return err
 			}
 
 			if g.UserID != userID {
@@ -540,7 +515,7 @@ func (o *OAuth2State) ListActiveGrantsForUser(ctx context.Context, userID string
 
 			grants = append(grants, GrantWithID{
 				ID:    grantID,
-				Grant: &g,
+				Grant: g,
 			})
 		}
 
@@ -572,7 +547,7 @@ func (o *OAuth2State) RevokeGrant(ctx context.Context, id string) error {
 
 // GarbageCollect removes expired auth codes, refresh tokens, and grants that expired more than oauth2GrantRetentionPeriod ago.
 // Returns the counts of deleted items.
-func (o *OAuth2State) GarbageCollect() (authCodesDeleted, refreshTokensDeleted, grantsDeleted int, err error) {
+func (o *OAuth2State) GarbageCollect() (authCodesDeleted, refreshTokensDeleted, userRefreshTokensDeleted, grantsDeleted int, err error) {
 	now := time.Now()
 	grantCutoff := now.Add(-oauth2GrantRetentionPeriod)
 
@@ -584,7 +559,7 @@ func (o *OAuth2State) GarbageCollect() (authCodesDeleted, refreshTokensDeleted, 
 		if authCodesBucket != nil {
 			c := authCodesBucket.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
-				_, err := parseAuthCodeKey(k)
+				_, err := uuid.Parse(string(k))
 				if err != nil {
 					if err := authCodesBucket.Delete(k); err == nil {
 						authCodesDeleted++
@@ -612,7 +587,7 @@ func (o *OAuth2State) GarbageCollect() (authCodesDeleted, refreshTokensDeleted, 
 		if refreshTokensBucket != nil {
 			c := refreshTokensBucket.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
-				_, err := parseRefreshTokenKey(k)
+				_, err := uuid.Parse(string(k))
 				if err != nil {
 					if err := refreshTokensBucket.Delete(k); err == nil {
 						refreshTokensDeleted++
@@ -661,72 +636,27 @@ func (o *OAuth2State) GarbageCollect() (authCodesDeleted, refreshTokensDeleted, 
 			}
 		}
 
+		userRefreshTokensBucket := tx.Bucket([]byte(bucketUserRefreshTokens))
+		if userRefreshTokensBucket != nil {
+			c := userRefreshTokensBucket.Cursor()
+			for k, _ := c.First(); k != nil; k, _ = c.Next() {
+				split := strings.Split(string(k), "/")
+				if len(split) != 2 {
+					if err := grantsBucket.Delete(k); err == nil {
+						grantsDeleted++
+					}
+				}
+				rtID := split[1]
+				if refreshTokensBucket.Get([]byte(rtID)) == nil {
+					if err := userRefreshTokensBucket.Delete(k); err == nil {
+						userRefreshTokensDeleted++
+					}
+				}
+			}
+		}
+
 		return nil
 	})
 
-	return authCodesDeleted, refreshTokensDeleted, grantsDeleted, err
-}
-
-type authCodeKey struct {
-	userID  string
-	grantID string
-	codeID  string
-}
-
-func (k *authCodeKey) key() ([]byte, error) {
-	if k.userID == "" || k.grantID == "" || k.codeID == "" {
-		return nil, fmt.Errorf("invalid key")
-	}
-	if strings.Contains(k.userID, "/") || strings.Contains(k.grantID, "/") || strings.Contains(k.codeID, "/") ||
-		strings.Contains(k.userID, ":") || strings.Contains(k.grantID, ":") || strings.Contains(k.codeID, ":") {
-		return nil, fmt.Errorf("invalid key")
-	}
-	return []byte(fmt.Sprintf("u:%s/g:%s/c:%s", k.userID, k.grantID, k.codeID)), nil
-}
-
-func parseAuthCodeKey(k []byte) (*authCodeKey, error) {
-	parts := strings.Split(string(k), "/")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid key")
-	}
-	if !strings.HasPrefix(parts[0], "u:") || !strings.HasPrefix(parts[1], "g:") || !strings.HasPrefix(parts[2], "c:") {
-		return nil, fmt.Errorf("invalid key")
-	}
-	return &authCodeKey{
-		userID:  strings.TrimPrefix(parts[0], "u:"),
-		grantID: strings.TrimPrefix(parts[1], "g:"),
-		codeID:  strings.TrimPrefix(parts[2], "c:"),
-	}, nil
-}
-
-type refreshTokenKey struct {
-	userID  string
-	grantID string
-	tokenID string
-}
-
-func (k *refreshTokenKey) key() ([]byte, error) {
-	if k.userID == "" || k.grantID == "" || k.tokenID == "" {
-		return nil, fmt.Errorf("invalid key")
-	}
-	if strings.Contains(k.userID, "/") || strings.Contains(k.grantID, "/") || strings.Contains(k.tokenID, "/") ||
-		strings.Contains(k.userID, ":") || strings.Contains(k.grantID, ":") || strings.Contains(k.tokenID, ":") {
-		return nil, fmt.Errorf("invalid key")
-	}
-	return []byte(fmt.Sprintf("u:%s/g:%s/t:%s", k.userID, k.grantID, k.tokenID)), nil
-}
-
-func parseRefreshTokenKey(k []byte) (*refreshTokenKey, error) {
-	parts := strings.Split(string(k), "/")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid key")
-	}
-	if !strings.HasPrefix(parts[0], "u:") || !strings.HasPrefix(parts[1], "g:") || !strings.HasPrefix(parts[2], "t:") {
-		return nil, fmt.Errorf("invalid key")
-	}
-	return &refreshTokenKey{
-		userID:  strings.TrimPrefix(parts[0], "u:"),
-		grantID: strings.TrimPrefix(parts[1], "g:"),
-		tokenID: strings.TrimPrefix(parts[2], "t:"),
-	}, nil
+	return authCodesDeleted, refreshTokensDeleted, userRefreshTokensDeleted, grantsDeleted, err
 }

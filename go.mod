@@ -1,6 +1,8 @@
 module lds.li/passidp
 
-go 1.26
+go 1.26.0
+
+replace lds.li/passidp/claims => ./claims
 
 require (
 	crawshaw.dev/jsonfile v0.0.0-20240206193014-699d1dad804e
@@ -21,6 +23,7 @@ require (
 	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.11
 	lds.li/oauth2ext v0.3.2-0.20260329174615-2e6e31768119
+	lds.li/passidp/claims v0.0.0-00010101000000-000000000000
 	lds.li/tinkrotate v0.1.0
 	lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7
 	sigs.k8s.io/yaml v1.6.0
@@ -40,7 +43,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect

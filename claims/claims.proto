@@ -1,0 +1,20 @@
+// Use edition 2023 until protoc-gen-go supports edition 2024.
+edition = "2023";
+
+package passidp.claims;
+
+import "google/protobuf/go_features.proto";
+
+option features.(pb.go).api_level = API_OPAQUE;
+option go_package = "lds.li/passidp/claims";
+
+// IDClaims are the claims that will be included in the ID token.
+message IDClaims {
+  string subject = 1 [json_name = "sub"];
+  string email = 2 [json_name = "email"];
+  bool email_verified = 3 [json_name = "email_verified"];
+  string picture = 4 [json_name = "picture"];
+  string name = 5 [json_name = "name"];
+  repeated string groups = 6 [json_name = "groups"];
+  string preferred_username = 7 [json_name = "preferred_username"];
+}

@@ -17,6 +17,7 @@ import (
 	"lds.li/passidp/internal/admincli"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/idp"
+	"lds.li/passidp/internal/policy"
 )
 
 const progname = "webauthn-oidc-idp"
@@ -53,11 +54,20 @@ var rootCmd = struct {
 	AdminSocketPath string                    `env:"IDP_ADMIN_SOCKET_PATH" help:"Path to Unix socket to serve the admin API (optional for serve)."`
 
 	Serve             idp.ServeCmd                  `cmd:"" help:"Serve the IDP server."`
+	ValidateConfig    ValidateConfigCmd             `cmd:"" help:"Validate the configuration file."`
 	AddCredential     admincli.AddCredentialCmd     `cmd:"" help:"Add a credential to a user."`
 	ConfirmCredential admincli.ConfirmCredentialCmd `cmd:"" help:"Confirm a pending credential enrollment."`
 	ListCredentials   admincli.ListCredentialsCmd   `cmd:"" help:"List all credentials."`
 	DeleteCredential  admincli.DeleteCredentialCmd  `cmd:"" help:"Delete a credential."`
 }{}
+
+type ValidateConfigCmd struct{}
+
+func (c *ValidateConfigCmd) Run() error {
+	// Everything is already validated in main
+	slog.Info("Configuration and policies are valid")
+	return nil
+}
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -91,7 +101,7 @@ func main() {
 	}
 	slog.SetDefault(slog.New(handler))
 
-	if clictx.Selected().Name != "serve" {
+	if clictx.Selected().Name != "serve" && clictx.Selected().Name != "validate-config" {
 		if rootCmd.AdminSocketPath == "" {
 			clictx.Fatalf("admin socket path is required")
 		}
@@ -100,6 +110,10 @@ func main() {
 	cfg, err := config.ParseConfig(rootCmd.ConfigFile)
 	if err != nil {
 		clictx.Fatalf("parse config from %s: %v", rootCmd.ConfigFile.Filename, err)
+	}
+
+	if err := policy.ValidatePolicies(cfg); err != nil {
+		clictx.Fatalf("validate policies: %v", err)
 	}
 
 	clictx.Bind(cfg)

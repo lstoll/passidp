@@ -2,6 +2,8 @@ module lds.li/passidp
 
 go 1.26
 
+replace lds.li/passidp/claims => ./claims
+
 require (
 	crawshaw.dev/jsonfile v0.0.0-20240206193014-699d1dad804e
 	github.com/alecthomas/kong v1.14.0
@@ -21,6 +23,7 @@ require (
 	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.11
 	lds.li/oauth2ext v0.3.1
+	lds.li/passidp/claims v0.0.0-00010101000000-000000000000
 	lds.li/tinkrotate v0.1.0
 	lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7
 	sigs.k8s.io/yaml v1.6.0

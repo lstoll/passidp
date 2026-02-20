@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tink-crypto/tink-go/v2/jwt"
 	"lds.li/oauth2ext/oauth2as"
+	"lds.li/passidp/claims"
 	"lds.li/passidp/internal/config"
 )
 
@@ -70,26 +70,25 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		anyGroups[i] = group
 	}
 
-	idc := jwt.RawJWTOptions{
-		CustomClaims: map[string]any{
-			"email":          user.Email,
-			"email_verified": true,
-			"picture":        gravatarURL(user.Email),
-			"name":           user.FullName,
-			"groups":         anyGroups,
-		},
+	cb := claims.IDClaims_builder{
+		Email:             new(user.Email),
+		EmailVerified:     new(true),
+		Picture:           new(gravatarURL(user.Email)),
+		Name:              new(user.FullName),
+		Groups:            user.Groups,
+		PreferredUsername: new(user.PreferredUsername),
 	}
 
 	if cl.UseOverrideSubject() && user.OverrideSubject != "" {
-		idc.Subject = &user.OverrideSubject
+		cb.Subject = new(user.OverrideSubject)
 	}
 
-	if v := user.PreferredUsername; v != "" {
-		idc.CustomClaims["preferred_username"] = v
+	if user.PreferredUsername != "" {
+		cb.PreferredUsername = new(user.PreferredUsername)
 	}
 
 	resp := &oauth2as.TokenResponse{
-		IDClaims: &idc,
+		IDClaims: claims.JWTOptsFromIDClaims(cb.Build()),
 	}
 
 	// Determine refresh token validity

@@ -23,6 +23,7 @@ import (
 	"lds.li/passidp/internal/clients"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/oidcsvr"
+	"lds.li/passidp/internal/policy"
 	"lds.li/passidp/internal/storage"
 	"lds.li/passidp/internal/webcommon"
 	"lds.li/web"
@@ -213,6 +214,11 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 
 	mgr.AddHandlers(websvr)
 
+	pol, err := policy.NewPolicyEvaluator()
+	if err != nil {
+		return nil, fmt.Errorf("creating policy evaluator: %w", err)
+	}
+
 	auth := &auth.Authenticator{
 		Webauthn:  wn,
 		CredStore: credStore,
@@ -225,6 +231,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Issuer:  issuerURL.String(),
 		Clients: clients,
 		Config:  cfg,
+		Policy:  pol,
 	}
 
 	oauth2asConfig := oauth2as.Config{
@@ -271,6 +278,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Discovery: disco,
 		Clients:   clients,
 		Config:    cfg,
+		Policy:    pol,
 	}
 
 	oidcs.AddHandlers(websvr)

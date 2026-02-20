@@ -24,8 +24,12 @@ type StaticClient struct {
 	configClient config.Client
 }
 
-func (c *StaticClient) UseOverrideSubject() bool {
-	return c.configClient.UseOverrideSubject
+func (c *StaticClient) ClaimsPolicy() string {
+	return c.configClient.ClaimsPolicy
+}
+
+func (c *StaticClient) AuthorizationPolicy() string {
+	return c.configClient.AuthorizationPolicy
 }
 
 func (c *StaticClient) GrantValidity() *time.Duration {
@@ -54,10 +58,6 @@ func (c *StaticClient) DPoPRefreshValidity() *time.Duration {
 		return new(c.configClient.DPoPRefreshValidity.Duration())
 	}
 	return nil
-}
-
-func (c *StaticClient) RequiredGroups() []string {
-	return c.configClient.RequiredGroups
 }
 
 // GetClient returns the client with the given ID, or nil if it doesn't exist.

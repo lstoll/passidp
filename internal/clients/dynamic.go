@@ -25,9 +25,14 @@ var _ oauth2as.ClientSource = (*DynamicClients)(nil)
 // any of the client details.
 type DynamicClient struct{}
 
-func (d *DynamicClient) UseOverrideSubject() bool {
-	// dynamic clients can't set subject overrides
-	return false
+func (d *DynamicClient) ClaimsPolicy() string {
+	// dynamic clients can't set claims policies
+	return ""
+}
+
+func (d *DynamicClient) AuthorizationPolicy() string {
+	// dynamic clients can't set authorization policies
+	return ""
 }
 
 func (d *DynamicClient) GrantValidity() *time.Duration {
@@ -46,11 +51,6 @@ func (d *DynamicClient) RefreshValidity() *time.Duration {
 }
 
 func (d *DynamicClient) DPoPRefreshValidity() *time.Duration {
-	return nil
-}
-
-func (d *DynamicClient) RequiredGroups() []string {
-	// dynamic clients don't have required groups
 	return nil
 }
 

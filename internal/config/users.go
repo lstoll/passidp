@@ -17,9 +17,8 @@ type User struct {
 	Email string `json:"email,omitzero"`
 	// FullName is the users full name.
 	FullName string `json:"fullName,omitzero"`
-	// OverrideSubject is the subject to use for the user, if the client is
-	// requesting an override subject.
-	OverrideSubject string `json:"overrideSubject,omitzero"`
+	// Metadata is a generic map of metadata for the user.
+	Metadata map[string]any `json:"metadata,omitzero"`
 	// WebauthnHandle is the users webauthn handle. Should be a UUIDv4, that
 	// differs from the users ID.
 	WebauthnHandle uuid.UUID `json:"webauthnHandle,omitzero"`

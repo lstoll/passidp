@@ -19,12 +19,16 @@ type Client struct {
 	Public bool `json:"public"`
 	// SkipPKCE indicates that this client should not be required to use PKCE.
 	SkipPKCE bool `json:"skipPKCE"`
-	// UseOverrideSubject indicates that this client should use the override
-	// subject for tokens/userinfo, rather than the user's ID
-	UseOverrideSubject bool `json:"useOverrideSubject"`
 	// UseRS256 indicates that this client should use RS256 for tokens/userinfo,
 	// rather than defaulting to ES256
 	UseRS256 bool `json:"useRS256"`
+	// ClaimsPolicy is a CEL expression that can be used to modify the claims
+	// for this client.
+	ClaimsPolicy string `json:"claimsPolicy"`
+	// AuthorizationPolicy is a CEL expression that can be used to determine if
+	// a user is authorized to access this client.
+	AuthorizationPolicy string `json:"authorizationPolicy"`
+
 	// GrantValidity overrides the default validity time for grants.
 	GrantValidity JSONDuration `json:"grantValidity"`
 	// TokenValidity overrides the default valitity time for ID/access tokens.
@@ -37,6 +41,8 @@ type Client struct {
 	// when DPoP is used. Go duration format.
 	DPoPRefreshValidity JSONDuration `json:"dpopRefreshValidity,omitempty"`
 	// RequiredGroups is a list of group names that the user must be a member of
-	// to access this client. If empty, no group membership is required.
+	// to access this client. If empty, no group membership is required. This is a convenience
+	// field that will be converted automatically to an AuthorizationPolicy. Both can not be
+	// specified at the same time.œ
 	RequiredGroups []string `json:"requiredGroups"`
 }

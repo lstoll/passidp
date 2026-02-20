@@ -83,6 +83,7 @@ func ParseConfig(cfgFile kong.NamedFileContentFlag) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
+
 	if err := c.SetDefaults(); err != nil {
 		return nil, fmt.Errorf("set defaults: %w", err)
 	}
@@ -93,6 +94,13 @@ func ParseConfig(cfgFile kong.NamedFileContentFlag) (*Config, error) {
 }
 
 func (c *Config) SetDefaults() error {
+	for i := range c.Clients {
+		cl := &c.Clients[i]
+		if len(cl.RequiredGroups) > 0 {
+			cl.AuthorizationPolicy = calculateAuthPolicyForClient(cl)
+		}
+	}
+
 	if c.SessionDuration == 0 {
 		c.SessionDuration = JSONDuration(1 * time.Hour)
 	}
@@ -136,6 +144,9 @@ func (c *Config) Validate() error {
 	for _, cl := range c.Clients {
 		if cl.ID == "" {
 			validErr = errors.Join(validErr, fmt.Errorf("client %s missing ID", cl.ID))
+		}
+		if len(cl.RequiredGroups) > 0 && cl.AuthorizationPolicy != calculateAuthPolicyForClient(&cl) {
+			validErr = errors.Join(validErr, fmt.Errorf("client %s cannot have both requiredGroups and authorizationPolicy", cl.ID))
 		}
 		if len(cl.Secrets) == 0 && !cl.Public {
 			validErr = errors.Join(validErr, fmt.Errorf("non-public client %s missing client secrets", cl.ID))
@@ -182,4 +193,16 @@ func getenvWithDefault(key string) string {
 		val = parts[1]
 	}
 	return val
+}
+
+func calculateAuthPolicyForClient(cl *Client) string {
+	if len(cl.RequiredGroups) > 0 {
+		// Construct a CEL expression that checks if any of the user's groups are in the required list
+		// user.groups.exists(g, g in ['group1', 'group2'])
+		return fmt.Sprintf(
+			"user.groups.exists(g, g in ['%s'])",
+			strings.Join(cl.RequiredGroups, "', '"),
+		)
+	}
+	return cl.AuthorizationPolicy
 }

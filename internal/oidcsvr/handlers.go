@@ -12,14 +12,17 @@ import (
 	"lds.li/oauth2ext/oauth2as"
 	"lds.li/passidp/claims"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/policy"
 )
 
 // Client represents the client information that is used for our custom token
 // handlers.
 type Client interface {
-	// UseOverrideSubject indicates that this client should use the override
-	// subject for tokens/userinfo, if the user has one set.
-	UseOverrideSubject() bool
+	// ClaimsPolicy returns the CEL expression for modifying claims.
+	ClaimsPolicy() string
+	// AuthorizationPolicy returns the CEL expression for determining if a user
+	// is authorized.
+	AuthorizationPolicy() string
 	// GrantValidity returns the validity time for grants.
 	GrantValidity() *time.Duration
 	// AccessIDTokenValidity returns the validity time for access/ID tokens. If
@@ -30,10 +33,6 @@ type Client interface {
 	// DPoPRefreshValidity returns the validity time for refresh tokens when DPoP
 	// is used.
 	DPoPRefreshValidity() *time.Duration
-	// RequiredGroups returns the list of group names that the user must be a
-	// member of to access this client. If empty, no group membership is
-	// required.
-	RequiredGroups() []string
 }
 
 // ClientSource defines the interface for retrieving client information
@@ -45,6 +44,7 @@ type Handlers struct {
 	Issuer  string
 	Config  *config.Config
 	Clients ClientSource
+	Policy  *policy.PolicyEvaluator
 }
 
 func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest) (_ *oauth2as.TokenResponse, retErr error) {
@@ -79,16 +79,18 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		PreferredUsername: new(user.PreferredUsername),
 	}
 
-	if cl.UseOverrideSubject() && user.OverrideSubject != "" {
-		cb.Subject = new(user.OverrideSubject)
-	}
+	idClaims := cb.Build()
 
-	if user.PreferredUsername != "" {
-		cb.PreferredUsername = new(user.PreferredUsername)
+	if h.Policy != nil && cl.ClaimsPolicy() != "" {
+		var err error
+		idClaims, err = h.Policy.EvaluateClaims(cl.ClaimsPolicy(), idClaims, user)
+		if err != nil {
+			return nil, fmt.Errorf("evaluate claims policy: %w", err)
+		}
 	}
 
 	resp := &oauth2as.TokenResponse{
-		IDClaims: claims.JWTOptsFromIDClaims(cb.Build()),
+		IDClaims: claims.JWTOptsFromIDClaims(idClaims),
 	}
 
 	// Determine refresh token validity

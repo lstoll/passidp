@@ -168,8 +168,8 @@ func (d *DynamicClients) shouldEnforcePKCE(applicationType, redirectURIs string)
 
 	// Check redirect URIs for localhost/127.0.0.1
 	if redirectURIs != "" {
-		uris := strings.Split(redirectURIs, ",")
-		for _, uri := range uris {
+		uris := strings.SplitSeq(redirectURIs, ",")
+		for uri := range uris {
 			uri = strings.TrimSpace(uri)
 			if uri == "" {
 				continue
@@ -266,7 +266,7 @@ func (d *DynamicClients) registerClient(w http.ResponseWriter, r *http.Request) 
 		ClientID:                clientID,
 		ClientSecret:            clientSecret,
 		ClientIDIssuedAt:        time.Now().Unix(),
-		ClientSecretExpiresAt:   ptr(expiresAt.Unix()),
+		ClientSecretExpiresAt:   new(expiresAt.Unix()),
 		RegistrationAccessToken: "", // Not implemented for now
 		RegistrationClientURI:   "", // Not implemented for now
 	}
@@ -409,8 +409,4 @@ func (d *DynamicClients) validateClientRegistration(req *oidcclientreg.ClientReg
 	}
 
 	return nil
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

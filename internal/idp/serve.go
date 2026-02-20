@@ -201,7 +201,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		},
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			UserVerification:   protocol.VerificationRequired,
-			RequireResidentKey: ptr(true),
+			RequireResidentKey: new(true),
 		},
 	})
 	if err != nil {
@@ -286,8 +286,4 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 	})
 
 	return websvr, nil
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

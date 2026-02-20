@@ -264,7 +264,7 @@ func (w *WebAuthnManager) finishRegistration(ctx context.Context, rw web.Respons
 
 	// Return success response with confirmation key
 	return rw.WriteResponse(req, &web.JSONResponse{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"success":          true,
 			"message":          "Passkey registered successfully!",
 			"confirmation_key": confirmationKey,

@@ -311,7 +311,7 @@ func (o *OAuth2State) CreateRefreshToken(ctx context.Context, tokenID string, to
 			return fmt.Errorf("store refresh token: %w", err)
 		}
 
-		if err := userRefreshTokensBucket.Put([]byte(fmt.Sprintf("%s/%s", grant.UserID, tokenID)), data); err != nil {
+		if err := userRefreshTokensBucket.Put(fmt.Appendf(nil, "%s/%s", grant.UserID, tokenID), data); err != nil {
 			return fmt.Errorf("store user refresh token: %w", err)
 		}
 
@@ -388,7 +388,7 @@ func (o *OAuth2State) ExpireRefreshToken(ctx context.Context, tokenID string) er
 			return err
 		}
 
-		if err := userRefreshTokensBucket.Delete([]byte(fmt.Sprintf("%s/%s", grant.UserID, tokenID))); err != nil {
+		if err := userRefreshTokensBucket.Delete(fmt.Appendf(nil, "%s/%s", grant.UserID, tokenID)); err != nil {
 			return fmt.Errorf("delete user refresh token: %w", err)
 		}
 

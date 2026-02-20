@@ -51,7 +51,7 @@ type Config struct {
 	RefreshTokenRotationGracePeriod JSONDuration `json:"refresh_token_rotation_grace_period,omitempty"`
 
 	// Serving contains configuration for serving the OIDC server.
-	Serving ServingConfig `json:"serving,omitempty"`
+	Serving ServingConfig `json:"serving"`
 }
 
 // ServingConfig contains configuration for serving the OIDC server.

@@ -78,7 +78,7 @@ func TestE2E(t *testing.T) {
 		// runtime, e.g js errors
 		chromeErrC = make(chan error, 10000)
 	)
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
+	chromedp.ListenTarget(ctx, func(ev any) {
 		switch ev := ev.(type) {
 		case *runtime.EventConsoleAPICalled:
 			t.Logf("*BROWSER* console.%s call:", ev.Type)
@@ -219,7 +219,7 @@ func TestE2E(t *testing.T) {
 		// Parse the enrollment URL, enrollment ID from enrollBuf
 		var enrollmentURL string
 		var enrollmentID string
-		for _, line := range strings.Split(enrollBuf.String(), "\n") {
+		for line := range strings.SplitSeq(enrollBuf.String(), "\n") {
 			if rest, ok := strings.CutPrefix(line, "Enroll at: "); ok {
 				enrollmentURL = strings.TrimSpace(rest)
 			}

@@ -30,28 +30,28 @@ func (c *StaticClient) UseOverrideSubject() bool {
 
 func (c *StaticClient) GrantValidity() *time.Duration {
 	if c.configClient.GrantValidity != 0 {
-		return ptr(c.configClient.GrantValidity.Duration())
+		return new(c.configClient.GrantValidity.Duration())
 	}
 	return nil
 }
 
 func (c *StaticClient) AccessIDTokenValidity() *time.Duration {
 	if c.configClient.TokenValidity != 0 {
-		return ptr(c.configClient.TokenValidity.Duration())
+		return new(c.configClient.TokenValidity.Duration())
 	}
 	return nil
 }
 
 func (c *StaticClient) RefreshValidity() *time.Duration {
 	if c.configClient.RefreshValidity != 0 {
-		return ptr(c.configClient.RefreshValidity.Duration())
+		return new(c.configClient.RefreshValidity.Duration())
 	}
 	return nil
 }
 
 func (c *StaticClient) DPoPRefreshValidity() *time.Duration {
 	if c.configClient.DPoPRefreshValidity != 0 {
-		return ptr(c.configClient.DPoPRefreshValidity.Duration())
+		return new(c.configClient.DPoPRefreshValidity.Duration())
 	}
 	return nil
 }

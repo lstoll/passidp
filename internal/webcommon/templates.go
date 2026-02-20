@@ -26,7 +26,7 @@ type LayoutData struct {
 var Templates *template.Template
 
 var FuncMap = template.FuncMap{
-	"default": func(value, defaultValue interface{}) interface{} {
+	"default": func(value, defaultValue any) any {
 		if value == nil || value == "" {
 			return defaultValue
 		}

@@ -90,7 +90,7 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 	}
 
 	resp := &oauth2as.TokenResponse{
-		IDClaims: claims.JWTOptsFromIDClaims(idClaims),
+		IDClaims: claims.RawJWTOptsFromIDClaims(idClaims),
 	}
 
 	// Determine refresh token validity

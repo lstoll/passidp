@@ -131,6 +131,8 @@ func (pe *PolicyEvaluator) EvaluateAuthorization(expression string, user *config
 	}
 
 	out, _, err := prg.Eval(map[string]any{
+		// TODO - we should expand this with more context, like the dpop/mtls
+		// status, more scopes stuff etc.
 		"user": userData,
 	})
 	if err != nil {

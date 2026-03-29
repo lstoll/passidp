@@ -223,7 +223,7 @@ func TestStateOAuth2Storage(t *testing.T) {
 }
 
 func TestOauth2ASStorage(t *testing.T) {
-	oauth2as.TestStorage(t, func() oauth2as.Storage {
+	oauth2as.TestStorage(t, func(t *testing.T) oauth2as.Storage {
 		storage, err := NewState(t.TempDir() + "/state.bolt")
 		if err != nil {
 			t.Fatalf("failed to create state: %v", err)

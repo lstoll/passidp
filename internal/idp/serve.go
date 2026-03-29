@@ -2,6 +2,8 @@ package idp
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"log/slog"
@@ -227,6 +229,23 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Config:  cfg,
 	}
 
+	dpopVerifier := &dpop.Verifier{}
+	if len(cfg.DPoPTrustBundle) > 0 {
+		certPool := x509.NewCertPool()
+		for _, cert := range cfg.DPoPTrustBundle {
+			block, _ := pem.Decode([]byte(cert))
+			if block == nil {
+				return nil, fmt.Errorf("DPoP trust bundle certificate is not a valid PEM-encoded certificate")
+			}
+			parsedCert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse DPoP trust bundle certificate: %w", err)
+			}
+			certPool.AddCert(parsedCert)
+		}
+		dpopVerifier.TrustedRoots = certPool
+	}
+
 	oauth2asConfig := oauth2as.Config{
 		Issuer:   issuerURL.String(),
 		Storage:  state.OAuth2State(),
@@ -234,7 +253,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *js
 		Signer:   oidcHandles,
 		Verifier: oidcHandles,
 
-		DPoPVerifier: &dpop.Verifier{},
+		DPoPVerifier: dpopVerifier,
 
 		TokenHandler:    oidchHandlers.TokenHandler,
 		UserinfoHandler: oidchHandlers.UserinfoHandler,

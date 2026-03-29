@@ -20,7 +20,7 @@ require (
 	golang.org/x/term v0.41.0
 	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.11
-	lds.li/oauth2ext v0.3.2-0.20260329144501-8965c505f1e0
+	lds.li/oauth2ext v0.3.2-0.20260329174615-2e6e31768119
 	lds.li/tinkrotate v0.1.0
 	lds.li/web v0.0.0-20250914000751-5c4fa2ecb9d7
 	sigs.k8s.io/yaml v1.6.0

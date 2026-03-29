@@ -39,7 +39,7 @@ func NewPolicyEvaluator() (*PolicyEvaluator, error) {
 						return types.NewErr("lhs is not IDClaims, got %T", lhs.Value())
 					}
 
-					nativeMap, err := rhs.ConvertToNative(reflect.TypeOf(map[string]any{}))
+					nativeMap, err := rhs.ConvertToNative(reflect.TypeFor[map[string]any]())
 					if err != nil {
 						return types.NewErr("failed to convert rhs to map: %v", err)
 					}

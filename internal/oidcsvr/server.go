@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +13,7 @@ import (
 	"lds.li/oauth2ext/oauth2as/discovery"
 	"lds.li/passidp/internal/auth"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/policy"
 	"lds.li/passidp/internal/ratelimit"
 	"lds.li/web"
 	"lds.li/web/httperror"
@@ -38,6 +38,7 @@ type Server struct {
 	Discovery *discovery.OIDCConfigurationHandler
 	Clients   ClientSource
 	Config    *config.Config
+	Policy    *policy.PolicyEvaluator
 }
 
 func (s *Server) AddHandlers(r *web.Server) {
@@ -127,21 +128,20 @@ func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest,
 		return "", httperror.BadRequestErrf("client %s not found", request.ClientID)
 	}
 
-	// Check required groups if any are specified
-	if len(client.RequiredGroups()) > 0 {
-		// Get user's active group memberships
-		user, err := s.Config.Users.GetUser(userID)
+	user, err := s.Config.Users.GetUser(userID)
+	if err != nil {
+		return "", fmt.Errorf("get user: %w", err)
+	}
+
+	// Check authorization policy if specified
+	if s.Policy != nil && client.AuthorizationPolicy() != "" {
+		authorized, err := s.Policy.EvaluateAuthorization(client.AuthorizationPolicy(), user)
 		if err != nil {
-			return "", fmt.Errorf("get user: %w", err)
+			return "", fmt.Errorf("evaluate authorization policy: %w", err)
 		}
 
-		// Check if user is in any of the required groups
-		hasRequiredGroup := slices.ContainsFunc(client.RequiredGroups(), func(requiredGroup string) bool {
-			return slices.Contains(user.Groups, requiredGroup)
-		})
-
-		if !hasRequiredGroup {
-			return "", httperror.ForbiddenErrf("user is not a member of any required groups for client %s", request.ClientID)
+		if !authorized {
+			return "", httperror.ForbiddenErrf("user is not authorized for client %s by policy", request.ClientID)
 		}
 	}
 

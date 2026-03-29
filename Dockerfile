@@ -3,6 +3,7 @@ FROM golang:1-trixie AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
+COPY claims/go.mod claims/go.sum ./claims/
 RUN go mod download
 
 COPY . .

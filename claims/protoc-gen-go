@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper that runs protoc-gen-go via "go run" so the binary need not be installed.
+set -e
+cd "$(dirname "$0")"
+exec go run google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11 "$@"

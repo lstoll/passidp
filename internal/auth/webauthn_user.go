@@ -81,7 +81,7 @@ func (a *Authenticator) NewDiscoverableUserHandler(ctx context.Context) webauthn
 			// process it as a fallback subject. This matches the earliest
 			// credentials we issued against this software.
 			for _, u := range a.Config.Users {
-				if u.OverrideSubject == string(userHandle) {
+				if os, ok := u.Metadata["overrideSubject"].(string); ok && os == string(userHandle) {
 					cfgUser = u
 					break
 				}
@@ -89,7 +89,7 @@ func (a *Authenticator) NewDiscoverableUserHandler(ctx context.Context) webauthn
 			if cfgUser == nil {
 				return nil, fmt.Errorf("user not found")
 			}
-			validateID = []byte(cfgUser.OverrideSubject)
+			validateID = []byte(cfgUser.Metadata["overrideSubject"].(string))
 		}
 
 		// Get user credentials

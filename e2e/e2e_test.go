@@ -30,6 +30,7 @@ import (
 	"lds.li/passidp/internal/admincli"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/idp"
+	"lds.li/passidp/internal/policy"
 	"lds.li/passidp/internal/storage"
 )
 
@@ -114,6 +115,10 @@ func TestE2E(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
+	}
+
+	if err := policy.ValidatePolicies(config); err != nil {
+		t.Fatalf("validate policies: %v", err)
 	}
 
 	serveCtx, serveCancel := context.WithCancel(context.Background())

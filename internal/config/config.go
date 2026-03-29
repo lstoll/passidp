@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/url"
@@ -41,6 +43,10 @@ type Config struct {
 
 	// DPoPRefreshValidity is the duration a DPoP refresh token is valid for. Defaults to 24h.
 	DPoPRefreshValidity JSONDuration `json:"dpop_refresh_validity,omitempty"`
+
+	// DPoPTrustBundle is a list of PEM-encoded certificates to check that DPoP claims
+	// roll up to. Optional, if not provided DPoP works as per spec.
+	DPoPTrustBundle []string `json:"dpopTrustBundle,omitempty"`
 
 	// GrantValidity is the duration grants are valid for. Defaults to 24h.
 	GrantValidity JSONDuration `json:"grant_validity,omitempty"`
@@ -168,6 +174,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Serving.AuthLimitBucket < 0 {
 		validErr = errors.Join(validErr, fmt.Errorf("authLimitBucket must be non-negative, got: %d", c.Serving.AuthLimitBucket))
+	}
+
+	for i, cert := range c.DPoPTrustBundle {
+		block, _ := pem.Decode([]byte(cert))
+		if block == nil {
+			validErr = errors.Join(validErr, fmt.Errorf("DPoP trust bundle certificate %d is not a valid PEM-encoded certificate", i))
+			continue
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			validErr = errors.Join(validErr, fmt.Errorf("DPoP trust bundle certificate %d is not a valid certificate: %w", i, err))
+		}
 	}
 
 	return validErr

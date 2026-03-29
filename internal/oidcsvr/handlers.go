@@ -122,7 +122,20 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		resp.IDTokenExpiry = time.Now().Add(tokenValidity)
 	}
 
-	slog.Info("token handler", "userID", userUUID.String(), "clientID", req.ClientID, "refreshRequested", req.IsRefresh, "refreshValidity", refreshValidity, "tokenValidity", tokenValidity, "dpopBound", req.DPoPBound)
+	logAttrs := []any{
+		slog.String("userID", userUUID.String()),
+		slog.String("clientID", req.ClientID),
+		slog.Bool("refreshRequested", req.IsRefresh),
+		slog.Duration("refreshValidity", refreshValidity),
+		slog.Duration("tokenValidity", tokenValidity),
+		slog.Bool("dpopBound", req.DPoPBound),
+	}
+	if req.DPoPBound && req.DPoPProof != nil && len(req.DPoPProof.CertificateChain) > 0 {
+		cert := req.DPoPProof.CertificateChain[0]
+		logAttrs = append(logAttrs, slog.String("dpop-subject", cert.Subject.String()))
+	}
+
+	slog.Info("token handler", logAttrs...)
 
 	return resp, nil
 }

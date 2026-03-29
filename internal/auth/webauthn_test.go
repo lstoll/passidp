@@ -28,7 +28,7 @@ import (
 
 func TestWebauthnAuth(t *testing.T) {
 	wn, err := webauthn.New(&webauthn.Config{
-		RPID:          "test",
+		RPID:          "test.example.com",
 		RPDisplayName: "Test",
 		RPOrigins:     []string{"https://example.com"},
 	})
@@ -113,7 +113,7 @@ func TestWebauthnAuth(t *testing.T) {
 
 		assertionResponse := virtualwebauthn.CreateAssertionResponse(
 			virtualwebauthn.RelyingParty{
-				ID:     "test",
+				ID:     "test.example.com",
 				Name:   "Test",
 				Origin: "https://example.com",
 			},
@@ -121,7 +121,7 @@ func TestWebauthnAuth(t *testing.T) {
 			credential,
 			virtualwebauthn.AssertionOptions{
 				Challenge:      challengeBytes,
-				RelyingPartyID: "test",
+				RelyingPartyID: "test.example.com",
 			},
 		)
 
@@ -245,7 +245,7 @@ func createUserWithCredential(t *testing.T, auth *Authenticator) (virtualwebauth
 
 	attestationResponse := virtualwebauthn.CreateAttestationResponse(
 		virtualwebauthn.RelyingParty{
-			ID:     "test",
+			ID:     "test.example.com",
 			Name:   "Test",
 			Origin: "https://example.com",
 		},
@@ -253,7 +253,7 @@ func createUserWithCredential(t *testing.T, auth *Authenticator) (virtualwebauth
 		credential,
 		virtualwebauthn.AttestationOptions{
 			Challenge:       challengeBytes,
-			RelyingPartyID:  "test",
+			RelyingPartyID:  "test.example.com",
 			UserID:          string(webauthnHandle[:]),
 			UserName:        "test@example.com",
 			UserDisplayName: "Test User",

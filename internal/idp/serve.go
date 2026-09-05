@@ -172,7 +172,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 
 // NewIDP creates a new IDP server for the given params.
 func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *storage.CredentialFile, oauth2 *oauth2as.Storage, sessionKV session.KV, keysetStore keyset.AdminStore, enrollments *storage.EnrollmentStore, dpopReplay dpop.ReplayStore, oauth2Grants *storage.OAuth2Grants, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
-	oidcHandles, sessionMAC, err := initKeysets(ctx, keysetStore)
+	oidcSigner, oidcKeys, sessionMAC, err := initKeysets(ctx, keysetStore)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
 	}
@@ -298,11 +298,11 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	}
 
 	oauth2asConfig := oauth2as.Config{
-		Issuer:   issuerURL.String(),
-		Storage:  oauth2,
-		Clients:  clients,
-		Signer:   oidcHandles,
-		Verifier: oidcHandles,
+		Issuer:           issuerURL.String(),
+		Storage:          oauth2,
+		Clients:          clients,
+		Signer:           oidcSigner,
+		VerificationKeys: oidcKeys,
 
 		DPoPVerifier: dpopVerifier,
 
@@ -331,7 +331,7 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	pmd.UserinfoEndpoint = issuerURL.String() + "/userinfo"
 	pmd.RegistrationEndpoint = fmt.Sprintf("%s/registerClient", issuerURL.String())
 
-	disco, err := discovery.NewOIDCConfigurationHandlerWithKeyset(pmd, oidcHandles)
+	disco, err := discovery.NewOIDCConfigurationHandlerWithVerificationKeys(pmd, oidcKeys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc configuration handler: %w", err)
 	}

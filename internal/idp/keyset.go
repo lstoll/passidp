@@ -2,17 +2,13 @@ package idp
 
 import (
 	"context"
-	"crypto"
 	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
-	jose "github.com/go-jose/go-jose/v4"
 	"lds.li/keyset"
 	"lds.li/oauth2ext/jwt"
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/session"
 )
 
@@ -20,6 +16,8 @@ const (
 	keysetIDOIDCRS256  = "oidc-rs256"
 	keysetIDOIDCES256  = "oidc-es256"
 	keysetIDSessionMAC = "session-mac"
+
+	oidcKeyRefreshInterval = time.Minute
 )
 
 var (
@@ -33,9 +31,16 @@ var (
 		Propagate: 6 * time.Hour,
 		PhaseOut:  24 * time.Hour,
 	}
+	oidcSigningKeysets = []struct {
+		id  string
+		alg jwt.Algorithm
+	}{
+		{id: keysetIDOIDCES256, alg: jwt.ES256},
+		{id: keysetIDOIDCRS256, alg: jwt.RS256},
+	}
 )
 
-func initKeysets(ctx context.Context, store keyset.AdminStore) (*KeysetSigner, session.Authenticator, error) {
+func initKeysets(ctx context.Context, store keyset.AdminStore) (*jwt.Signer, *jwt.VerificationKeySet, session.Authenticator, error) {
 	rotator, err := keyset.NewRotator(store,
 		keyset.WithInterval(10*time.Minute),
 		keyset.WithEnsure(map[string]keyset.Spec{
@@ -45,105 +50,104 @@ func initKeysets(ctx context.Context, store keyset.AdminStore) (*KeysetSigner, s
 		}),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create keyset rotator: %w", err)
+		return nil, nil, nil, fmt.Errorf("create keyset rotator: %w", err)
 	}
 	if err := rotator.Once(ctx); err != nil {
-		return nil, nil, fmt.Errorf("provision keysets: %w", err)
+		return nil, nil, nil, fmt.Errorf("provision keysets: %w", err)
 	}
 	if err := rotator.Run(ctx); err != nil {
-		return nil, nil, fmt.Errorf("start keyset rotator: %w", err)
+		return nil, nil, nil, fmt.Errorf("start keyset rotator: %w", err)
 	}
 
 	client, err := keyset.NewClient(store, keyset.WithTTL(5*time.Minute))
 	if err != nil {
-		return nil, nil, fmt.Errorf("create keyset client: %w", err)
+		return nil, nil, nil, fmt.Errorf("create keyset client: %w", err)
 	}
-	return &KeysetSigner{client: client}, &keysetSessionAuthenticator{client: client}, nil
-}
 
-type KeysetSigner struct {
-	client *keyset.Client
-}
-
-var (
-	_ oauth2as.JWTSigner   = (*KeysetSigner)(nil)
-	_ oauth2as.JWTVerifier = (*KeysetSigner)(nil)
-)
-
-func (k *KeysetSigner) Algorithms(context.Context) ([]jwt.Algorithm, error) {
-	return []jwt.Algorithm{jwt.RS256, jwt.ES256}, nil
-}
-
-func (k *KeysetSigner) SignJWT(ctx context.Context, algorithm jwt.Algorithm, input oauth2as.JWTSigningInput) (string, error) {
-	var keysetID string
-	switch algorithm {
-	case jwt.RS256:
-		keysetID = keysetIDOIDCRS256
-	case jwt.ES256:
-		keysetID = keysetIDOIDCES256
-	default:
-		return "", fmt.Errorf("unsupported signing algorithm %q", algorithm)
-	}
-	signer, err := k.client.Signer(ctx, keysetID)
+	signer, keys, err := loadOIDCHandles(ctx, store)
 	if err != nil {
-		return "", fmt.Errorf("load signing keyset: %w", err)
+		return nil, nil, nil, err
 	}
-	local, err := oauth2as.NewLocalJWTSigner(oauth2as.LocalJWTSignerConfig{
-		SigningKeys: []oauth2as.SigningKey{{Algorithm: algorithm, Key: signer}},
-	})
-	if err != nil {
-		return "", fmt.Errorf("create JWT signer: %w", err)
-	}
-	return local.SignJWT(ctx, algorithm, input)
+	go refreshOIDCHandles(ctx, store, signer, keys)
+
+	return signer, keys, &keysetSessionAuthenticator{client: client}, nil
 }
 
-func (k *KeysetSigner) VerifyJWT(ctx context.Context, compact string, policy jwt.ValidationPolicy) (*jwt.VerifiedJWT, error) {
-	encoded, err := k.JWKS(ctx)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := jwt.ParseJWKSet(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("parse JWKS: %w", err)
-	}
-	return keys.VerifyJWT(compact, policy)
-}
-
-func (k *KeysetSigner) JWKS(ctx context.Context) ([]byte, error) {
-	set := jose.JSONWebKeySet{}
-	keysets := []struct {
-		id        string
-		algorithm string
-	}{
-		{id: keysetIDOIDCRS256, algorithm: string(jwt.RS256)},
-		{id: keysetIDOIDCES256, algorithm: string(jwt.ES256)},
-	}
-	for _, spec := range keysets {
-		public, err := k.client.Public(ctx, spec.id)
+func loadOIDCHandles(ctx context.Context, store keyset.Store) (*jwt.Signer, *jwt.VerificationKeySet, error) {
+	signingKeys := make([]jwt.SigningKey, 0, len(oidcSigningKeysets))
+	verificationKeys := make([]jwt.VerificationKey, 0, len(oidcSigningKeysets)*2)
+	for _, spec := range oidcSigningKeysets {
+		ks, err := store.Get(ctx, spec.id)
 		if err != nil {
-			return nil, fmt.Errorf("load public signing keyset %q: %w", spec.id, err)
+			return nil, nil, fmt.Errorf("load signing keyset %q: %w", spec.id, err)
 		}
-		if _, err := public.Verifier(); err != nil {
-			return nil, fmt.Errorf("validate public signing keyset %q: %w", spec.id, err)
+		primary, err := ks.Signer()
+		if err != nil {
+			return nil, nil, fmt.Errorf("load primary signer for %q: %w", spec.id, err)
 		}
-		for _, source := range public.Keys {
+
+		signingKeys = append(signingKeys, jwt.SigningKey{
+			Signer:    primary,
+			Algorithm: spec.alg,
+			KeyID:     fmt.Sprintf("%d", primary.KeyID()),
+		})
+
+		for _, source := range ks.Public().Keys {
 			if source.State == "disabled" {
 				continue
 			}
-			publicKey, err := x509.ParsePKIXPublicKey(source.PublicKey)
+			key, err := verificationKeyFromPublic(spec.alg, source.ID, source.PublicKey)
 			if err != nil {
-				return nil, fmt.Errorf("parse public key %d from keyset %q: %w", source.ID, spec.id, err)
+				return nil, nil, fmt.Errorf("public key %d from keyset %q: %w", source.ID, spec.id, err)
 			}
-			key := jose.JSONWebKey{Key: publicKey, Algorithm: spec.algorithm, Use: "sig"}
-			thumbprint, err := key.Thumbprint(crypto.SHA256)
-			if err != nil {
-				return nil, fmt.Errorf("calculate JWK thumbprint for key %d from keyset %q: %w", source.ID, spec.id, err)
-			}
-			key.KeyID = base64.RawURLEncoding.EncodeToString(thumbprint)
-			set.Keys = append(set.Keys, key)
+			verificationKeys = append(verificationKeys, key)
 		}
 	}
-	return json.Marshal(set)
+
+	signer, err := jwt.NewSignerFromKeys(jwt.SignerConfig{
+		Keys:                signingKeys,
+		PreferredAlgorithms: []jwt.Algorithm{jwt.ES256, jwt.RS256},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create JWT signer: %w", err)
+	}
+	keys, err := jwt.NewVerificationKeySet(verificationKeys...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create verification key set: %w", err)
+	}
+	return signer, keys, nil
+}
+
+func refreshOIDCHandles(ctx context.Context, store keyset.Store, signer *jwt.Signer, keys *jwt.VerificationKeySet) {
+	ticker := time.NewTicker(oidcKeyRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			nextSigner, nextKeys, err := loadOIDCHandles(ctx, store)
+			if err != nil {
+				slog.ErrorContext(ctx, "refresh oauth signing keys", slog.String("error", err.Error()))
+				continue
+			}
+			if err := keys.Replace(nextKeys); err != nil {
+				slog.ErrorContext(ctx, "replace oauth verification keys", slog.String("error", err.Error()))
+				continue
+			}
+			if err := signer.Replace(nextSigner); err != nil {
+				slog.ErrorContext(ctx, "replace oauth signer", slog.String("error", err.Error()))
+			}
+		}
+	}
+}
+
+func verificationKeyFromPublic(alg jwt.Algorithm, id uint32, der []byte) (jwt.VerificationKey, error) {
+	publicKey, err := x509.ParsePKIXPublicKey(der)
+	if err != nil {
+		return jwt.VerificationKey{}, fmt.Errorf("parse public key: %w", err)
+	}
+	return jwt.VerificationKey{Key: publicKey, Algorithm: alg, KeyID: fmt.Sprintf("%d", id)}, nil
 }
 
 type keysetSessionAuthenticator struct {

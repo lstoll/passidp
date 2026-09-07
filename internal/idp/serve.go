@@ -331,7 +331,10 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	pmd.UserinfoEndpoint = issuerURL.String() + "/userinfo"
 	pmd.RegistrationEndpoint = fmt.Sprintf("%s/registerClient", issuerURL.String())
 
-	disco, err := discovery.NewOIDCConfigurationHandlerWithVerificationKeys(pmd, oidcKeys)
+	disco, err := discovery.NewOIDCConfigurationHandler(discovery.ConfigurationHandlerConfig{
+		Metadata:         pmd,
+		VerificationKeys: oidcKeys,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc configuration handler: %w", err)
 	}

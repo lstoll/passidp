@@ -11,9 +11,10 @@ import (
 
 const keysetTableName = "keysets"
 
-// NewKeysetStore uses cleartext key material explicitly. This matches the old
-// Tink store's at-rest behavior; deployments can introduce a Keeper once a
-// persistent wrapping-key source is available.
+// NewKeysetStore uses cleartext key material explicitly. Deployments can
+// introduce a Keeper once a persistent wrapping-key source is available.
+// Schema() is applied after migrations, including the reset that drops the
+// previous envelope format.
 func NewKeysetStore(db *sql.DB) (*sqlstore.Store, error) {
 	store, err := sqlstore.New(db, insecurecleartext.Keeper,
 		sqlstore.WithDialect(sqlstore.SQLite),

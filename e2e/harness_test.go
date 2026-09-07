@@ -18,6 +18,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/oklog/run"
 	"golang.org/x/oauth2"
+	"lds.li/oauth2ext/oauth2client"
 	"lds.li/oauth2ext/oidc"
 	"lds.li/oauth2ext/provider"
 	"lds.li/passidp/internal/admincli"
@@ -35,6 +36,7 @@ type e2eHarness struct {
 	virtID     cdpwebauthn.AuthenticatorID
 	provider   *provider.Provider
 	oa2Cfg     oauth2.Config
+	clientType oauth2client.ClientType
 }
 
 func startE2E(t *testing.T, seed func(*config.Config, *storage.CredentialFile) error) *e2eHarness {
@@ -164,10 +166,9 @@ func startE2E(t *testing.T, seed func(*config.Config, *storage.CredentialFile) e
 		t.Fatal(err)
 	}
 	oa2Cfg := oauth2.Config{
-		ClientID:     "test-cli",
-		ClientSecret: "public",
-		Endpoint:     oidcProvider.Endpoint(),
-		Scopes:       []string{oidc.ScopeOpenID},
+		ClientID: "test-cli",
+		Endpoint: oidcProvider.Endpoint(),
+		Scopes:   []string{oidc.ScopeOpenID},
 	}
 
 	var virtID cdpwebauthn.AuthenticatorID
@@ -207,5 +208,6 @@ func startE2E(t *testing.T, seed func(*config.Config, *storage.CredentialFile) e
 		virtID:     virtID,
 		provider:   oidcProvider,
 		oa2Cfg:     oa2Cfg,
+		clientType: oauth2client.PublicClient,
 	}
 }

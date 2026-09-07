@@ -113,10 +113,10 @@ google.golang.org/genproto/googleapis/rpc v0.0.0-20260904194346-d0f1323225a4 h1:
 google.golang.org/genproto/googleapis/rpc v0.0.0-20260904194346-d0f1323225a4/go.mod h1:DjtHYE8FKJLivXcBEjGwndXfIC23G0VpXiXKqG179uA=
 google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
 google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
-lds.li/keyset v0.0.0-20260814215456-f6e0540f1600 h1:8+akd2u/IWRVQsytdUjBOLJGONuRLGgfrNu3vyQ6spM=
-lds.li/keyset v0.0.0-20260814215456-f6e0540f1600/go.mod h1:swebJ6oztpgX8BjJtzm8wDZn5Kp1DXlOnzg9/D0Gr58=
-lds.li/oauth2ext v0.3.2-0.20260907080832-90a6f0f64689 h1:1x5ALDwjflOG9ICPoF1DufX92VHZlooH3qYZsh7N0FE=
-lds.li/oauth2ext v0.3.2-0.20260907080832-90a6f0f64689/go.mod h1:37o3PwmDZxQ7B33vwhrPgx3r7xeFRj3K6KxA/FJRRws=
+lds.li/keyset v0.0.0-20260907140947-33aea7d06e15 h1:oHQpw035QUD6v+neK38K3wd0V/KIYNGmpJvk4ALaQ1w=
+lds.li/keyset v0.0.0-20260907140947-33aea7d06e15/go.mod h1:0HmQ35d4vSYou+QY1wJwH6yDHroDu5V6B6gsU5jDSEo=
+lds.li/oauth2ext v0.3.2-0.20260926132206-979605a7ce93 h1:BbmzBJDGzSywTsYLclABey2lIoTngOiVulGXlMWEUq0=
+lds.li/oauth2ext v0.3.2-0.20260926132206-979605a7ce93/go.mod h1:37o3PwmDZxQ7B33vwhrPgx3r7xeFRj3K6KxA/FJRRws=
 lds.li/session v1.0.0-alpha.1.0.20260905212820-725ca8449331 h1:VMD392aVnuwS1i3/dmuH7mYKQ6rX1L5b5xX9+1zdWrE=
 lds.li/session v1.0.0-alpha.1.0.20260905212820-725ca8449331/go.mod h1:2EgWZUepxO+SbASDevBYIR+0efOHH6KYXvMAsFDB7os=
 lds.li/web v0.0.0-20260711155052-b5bda5b245fc h1:6BlX88yOPPqqfRVhrcuzHnmaCgFBygEaU/fJACcGSkI=

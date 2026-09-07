@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"lds.li/keyset/insecurecleartext"
 	"lds.li/keyset/memstore"
@@ -22,9 +23,11 @@ func TestKeysetSignerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	algorithms := signer.Algorithms()
-	if len(algorithms) != 2 || algorithms[0] != jwt.ES256 || algorithms[1] != jwt.RS256 {
-		t.Fatalf("algorithms = %v", algorithms)
+	algorithms := []jwt.Algorithm{jwt.ES256, jwt.RS256}
+	for _, algorithm := range algorithms {
+		if !signer.SupportsAlgorithm(algorithm) {
+			t.Fatalf("signer does not support %s", algorithm)
+		}
 	}
 
 	for _, algorithm := range algorithms {
@@ -34,16 +37,24 @@ func TestKeysetSignerRoundTrip(t *testing.T) {
 				"sub": "test",
 				"iat": now.Unix(),
 				"exp": now.Add(time.Hour).Unix(),
-			}, jwt.SignOptions{Algorithms: []jwt.Algorithm{algorithm}})
+			}, jwt.SignOptions{Algorithm: algorithm})
 			if err != nil {
 				t.Fatal(err)
 			}
-			verified, err := keys.VerifyJWT(compact, jwt.ValidationPolicy{
+			if _, err := uuid.Parse(jwtHeaderKID(t, compact)); err != nil {
+				t.Fatalf("kid is not a UUID: %v", err)
+			}
+			verifier, err := jwt.NewVerifier(keys, jwt.ValidationPolicy{
 				IgnoreIssuer:      true,
 				IgnoreAudiences:   true,
 				AllowedAlgorithms: []jwt.Algorithm{algorithm},
+				Type:              jwt.TypeAny,
 				RequireIssuedAt:   true,
 			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			verified, err := verifier.Verify(compact)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,9 +96,10 @@ func TestOIDCHandlesReplaceAfterRotation(t *testing.T) {
 		IgnoreIssuer:      true,
 		IgnoreAudiences:   true,
 		AllowedAlgorithms: []jwt.Algorithm{jwt.ES256},
+		Type:              jwt.TypeAny,
 		RequireIssuedAt:   true,
 	}
-	oldCompact, err := signer.Sign(ctx, claims, jwt.SignOptions{Algorithms: []jwt.Algorithm{jwt.ES256}})
+	oldCompact, err := signer.Sign(ctx, claims, jwt.SignOptions{Algorithm: jwt.ES256})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +109,7 @@ func TestOIDCHandlesReplaceAfterRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ks.Rotate(now.Add(25 * time.Hour)); err != nil {
+	if _, err := ks.Rotate(ctx, now.Add(25*time.Hour), newES256Material); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Write(ctx, keysetIDOIDCES256, ks, rev); err != nil {
@@ -115,18 +127,22 @@ func TestOIDCHandlesReplaceAfterRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := keys.VerifyJWT(oldCompact, policy); err != nil {
+	verifier, err := jwt.NewVerifier(keys, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifier.Verify(oldCompact); err != nil {
 		t.Fatalf("old token should still verify after rotation: %v", err)
 	}
 
-	newCompact, err := signer.Sign(ctx, claims, jwt.SignOptions{Algorithms: []jwt.Algorithm{jwt.ES256}})
+	newCompact, err := signer.Sign(ctx, claims, jwt.SignOptions{Algorithm: jwt.ES256})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := jwtHeaderKID(t, newCompact); got == oldKID {
 		t.Fatal("expected a new signing kid after rotation")
 	}
-	if _, err := keys.VerifyJWT(newCompact, policy); err != nil {
+	if _, err := verifier.Verify(newCompact); err != nil {
 		t.Fatalf("new token should verify: %v", err)
 	}
 }

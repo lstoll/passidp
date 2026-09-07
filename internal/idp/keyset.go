@@ -2,6 +2,11 @@ package idp
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
 	"log/slog"
@@ -16,6 +21,10 @@ const (
 	keysetIDOIDCRS256  = "oidc-rs256"
 	keysetIDOIDCES256  = "oidc-es256"
 	keysetIDSessionMAC = "session-mac"
+
+	typeOIDCRS256  = keysetIDOIDCRS256
+	typeOIDCES256  = keysetIDOIDCES256
+	typeSessionMAC = keysetIDSessionMAC
 
 	oidcKeyRefreshInterval = time.Minute
 )
@@ -40,13 +49,17 @@ var (
 	}
 )
 
-func initKeysets(ctx context.Context, store keyset.AdminStore) (*jwt.Signer, *jwt.VerificationKeySet, session.Authenticator, error) {
-	rotator, err := keyset.NewRotator(store,
+func initKeysets(ctx context.Context, store keyset.AdminStore) (*jwt.SigningKeySet, *jwt.VerificationKeySet, session.Authenticator, error) {
+	registry, err := newKeysetRegistry()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	rotator, err := keyset.NewRotator(store, registry,
 		keyset.WithInterval(10*time.Minute),
-		keyset.WithEnsure(map[string]keyset.Spec{
-			keysetIDOIDCRS256:  {Algorithm: keyset.RSAPKCS1v15_2048_SHA256, Policy: oidcPolicy},
-			keysetIDOIDCES256:  {Algorithm: keyset.ECDSAP256SHA256, Policy: oidcPolicy},
-			keysetIDSessionMAC: {Algorithm: keyset.HMACSHA256, Policy: sessionMACPolicy},
+		keyset.WithEnsure(map[string]string{
+			keysetIDOIDCRS256:  typeOIDCRS256,
+			keysetIDOIDCES256:  typeOIDCES256,
+			keysetIDSessionMAC: typeSessionMAC,
 		}),
 	)
 	if err != nil {
@@ -73,43 +86,91 @@ func initKeysets(ctx context.Context, store keyset.AdminStore) (*jwt.Signer, *jw
 	return signer, keys, &keysetSessionAuthenticator{client: client}, nil
 }
 
-func loadOIDCHandles(ctx context.Context, store keyset.Store) (*jwt.Signer, *jwt.VerificationKeySet, error) {
-	signingKeys := make([]jwt.SigningKey, 0, len(oidcSigningKeysets))
+func newKeysetRegistry() (*keyset.Registry, error) {
+	registry, err := keyset.NewRegistry(map[string]keyset.Type{
+		typeOIDCES256:  {Policy: oidcPolicy, New: newES256Material},
+		typeOIDCRS256:  {Policy: oidcPolicy, New: newRS256Material},
+		typeSessionMAC: {Policy: sessionMACPolicy, New: newHMACSHA256Material},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create keyset registry: %w", err)
+	}
+	return registry, nil
+}
+
+func newES256Material(context.Context) (keyset.Material, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return keyset.Material{}, err
+	}
+	return marshalSigningMaterial(key, &key.PublicKey)
+}
+
+func newRS256Material(context.Context) (keyset.Material, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return keyset.Material{}, err
+	}
+	return marshalSigningMaterial(key, &key.PublicKey)
+}
+
+func newHMACSHA256Material(context.Context) (keyset.Material, error) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return keyset.Material{}, err
+	}
+	return keyset.Material{Private: key}, nil
+}
+
+func marshalSigningMaterial(private any, public crypto.PublicKey) (keyset.Material, error) {
+	privBytes, err := x509.MarshalPKCS8PrivateKey(private)
+	if err != nil {
+		return keyset.Material{}, fmt.Errorf("marshal private key: %w", err)
+	}
+	pubBytes, err := x509.MarshalPKIXPublicKey(public)
+	if err != nil {
+		return keyset.Material{}, fmt.Errorf("marshal public key: %w", err)
+	}
+	return keyset.Material{Private: privBytes, Public: pubBytes}, nil
+}
+
+func loadOIDCHandles(ctx context.Context, store keyset.Store) (*jwt.SigningKeySet, *jwt.VerificationKeySet, error) {
+	identities := make([]*jwt.SigningIdentity, 0, len(oidcSigningKeysets))
 	verificationKeys := make([]jwt.VerificationKey, 0, len(oidcSigningKeysets)*2)
 	for _, spec := range oidcSigningKeysets {
 		ks, err := store.Get(ctx, spec.id)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load signing keyset %q: %w", spec.id, err)
 		}
-		primary, err := ks.Signer()
-		if err != nil {
-			return nil, nil, fmt.Errorf("load primary signer for %q: %w", spec.id, err)
+		primary, ok := ks.Primary()
+		if !ok {
+			return nil, nil, fmt.Errorf("signing keyset %q has no primary", spec.id)
 		}
-
-		signingKeys = append(signingKeys, jwt.SigningKey{
-			Signer:    primary,
-			Algorithm: spec.alg,
-			KeyID:     fmt.Sprintf("%d", primary.KeyID()),
-		})
+		signer, err := signerFromPKCS8(primary.Private)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse primary signer for %q: %w", spec.id, err)
+		}
+		identity, err := jwt.NewSigningIdentity(signer, spec.alg, primary.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create signing identity for %q: %w", spec.id, err)
+		}
+		identities = append(identities, identity)
 
 		for _, source := range ks.Public().Keys {
-			if source.State == "disabled" {
+			if !source.State.IsUsable() {
 				continue
 			}
 			key, err := verificationKeyFromPublic(spec.alg, source.ID, source.PublicKey)
 			if err != nil {
-				return nil, nil, fmt.Errorf("public key %d from keyset %q: %w", source.ID, spec.id, err)
+				return nil, nil, fmt.Errorf("public key %s from keyset %q: %w", source.ID, spec.id, err)
 			}
 			verificationKeys = append(verificationKeys, key)
 		}
 	}
 
-	signer, err := jwt.NewSignerFromKeys(jwt.SignerConfig{
-		Keys:                signingKeys,
-		PreferredAlgorithms: []jwt.Algorithm{jwt.ES256, jwt.RS256},
-	})
+	signer, err := jwt.NewSigningKeySet(identities...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create JWT signer: %w", err)
+		return nil, nil, fmt.Errorf("create JWT signing key set: %w", err)
 	}
 	keys, err := jwt.NewVerificationKeySet(verificationKeys...)
 	if err != nil {
@@ -118,7 +179,7 @@ func loadOIDCHandles(ctx context.Context, store keyset.Store) (*jwt.Signer, *jwt
 	return signer, keys, nil
 }
 
-func refreshOIDCHandles(ctx context.Context, store keyset.Store, signer *jwt.Signer, keys *jwt.VerificationKeySet) {
+func refreshOIDCHandles(ctx context.Context, store keyset.Store, signer *jwt.SigningKeySet, keys *jwt.VerificationKeySet) {
 	ticker := time.NewTicker(oidcKeyRefreshInterval)
 	defer ticker.Stop()
 	for {
@@ -142,12 +203,24 @@ func refreshOIDCHandles(ctx context.Context, store keyset.Store, signer *jwt.Sig
 	}
 }
 
-func verificationKeyFromPublic(alg jwt.Algorithm, id uint32, der []byte) (jwt.VerificationKey, error) {
+func verificationKeyFromPublic(alg jwt.Algorithm, id string, der []byte) (jwt.VerificationKey, error) {
 	publicKey, err := x509.ParsePKIXPublicKey(der)
 	if err != nil {
 		return jwt.VerificationKey{}, fmt.Errorf("parse public key: %w", err)
 	}
-	return jwt.VerificationKey{Key: publicKey, Algorithm: alg, KeyID: fmt.Sprintf("%d", id)}, nil
+	return jwt.VerificationKey{Key: publicKey, Algorithm: alg, KeyID: id}, nil
+}
+
+func signerFromPKCS8(der []byte) (crypto.Signer, error) {
+	key, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, err
+	}
+	signer, ok := key.(crypto.Signer)
+	if !ok {
+		return nil, fmt.Errorf("PKCS#8 key is not a signer")
+	}
+	return signer, nil
 }
 
 type keysetSessionAuthenticator struct {
@@ -155,17 +228,36 @@ type keysetSessionAuthenticator struct {
 }
 
 func (a *keysetSessionAuthenticator) Authenticate(message []byte) ([]byte, error) {
-	mac, err := a.client.MAC(context.Background(), keysetIDSessionMAC)
+	mac, err := a.sessionMAC()
 	if err != nil {
 		return nil, err
 	}
-	return mac.Compute(message)
+	return mac.Authenticate(message)
 }
 
 func (a *keysetSessionAuthenticator) Verify(message, authenticator []byte) error {
-	mac, err := a.client.MAC(context.Background(), keysetIDSessionMAC)
+	mac, err := a.sessionMAC()
 	if err != nil {
 		return err
 	}
-	return mac.Verify(authenticator, message)
+	return mac.Verify(message, authenticator)
+}
+
+func (a *keysetSessionAuthenticator) sessionMAC() (session.Authenticator, error) {
+	ks, err := a.client.Get(context.Background(), keysetIDSessionMAC)
+	if err != nil {
+		return nil, err
+	}
+	primary, ok := ks.Primary()
+	if !ok {
+		return nil, fmt.Errorf("session keyset has no primary")
+	}
+	var previous [][]byte
+	for _, key := range ks.Keys() {
+		if key.ID == primary.ID || !key.State.IsUsable() {
+			continue
+		}
+		previous = append(previous, key.Private)
+	}
+	return session.NewHMACSHA256Authenticator(primary.Private, previous...)
 }

@@ -154,14 +154,39 @@ func (c *Config) Validate() error {
 		c.ParsedIssuer = u
 	}
 
+	clientIDs := make(map[string]struct{}, len(c.Clients))
 	for _, cl := range c.Clients {
 		if cl.ID == "" {
 			validErr = errors.Join(validErr, fmt.Errorf("client %s missing ID", cl.ID))
+		} else if _, ok := clientIDs[cl.ID]; ok {
+			validErr = errors.Join(validErr, fmt.Errorf("duplicate client ID %s", cl.ID))
+		} else {
+			clientIDs[cl.ID] = struct{}{}
 		}
 		if len(cl.RequiredGroups) > 0 && cl.AuthorizationPolicy != calculateAuthPolicyForClient(&cl) {
 			validErr = errors.Join(validErr, fmt.Errorf("client %s cannot have both requiredGroups and authorizationPolicy", cl.ID))
 		}
-		if len(cl.Secrets) == 0 && !cl.Public {
+		hasClientJWTKeys := len(cl.ClientJWTPublicKeys) > 0
+		hasClientJWKS := cl.JWKSURL != ""
+		hasClientJWT := hasClientJWTKeys || hasClientJWKS
+		if hasClientJWKS {
+			if u, err := url.Parse(cl.JWKSURL); err != nil || u.Scheme != "https" || u.Host == "" {
+				validErr = errors.Join(validErr, fmt.Errorf("client %s jwksURL must be an absolute https URL", cl.ID))
+			}
+		}
+		if hasClientJWTKeys && hasClientJWKS {
+			validErr = errors.Join(validErr, fmt.Errorf("client %s cannot configure both clientJWTPublicKeys and jwksURL", cl.ID))
+		}
+		if hasClientJWT && len(cl.Secrets) > 0 {
+			validErr = errors.Join(validErr, fmt.Errorf("client %s cannot combine private_key_jwt with client secrets", cl.ID))
+		}
+		if hasClientJWT && cl.Public {
+			validErr = errors.Join(validErr, fmt.Errorf("client %s cannot combine private_key_jwt with public client authentication", cl.ID))
+		}
+		if cl.Public && len(cl.Secrets) > 0 {
+			validErr = errors.Join(validErr, fmt.Errorf("client %s cannot combine public client authentication with client secrets", cl.ID))
+		}
+		if len(cl.Secrets) == 0 && !cl.Public && !hasClientJWT {
 			validErr = errors.Join(validErr, fmt.Errorf("non-public client %s missing client secrets", cl.ID))
 		}
 		if cl.Public && cl.SkipPKCE {

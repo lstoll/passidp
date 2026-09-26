@@ -93,8 +93,17 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 		}
 	})
 
-	multiClients := clients.NewMultiClients(&clients.StaticClients{
-		Clients: config.Clients},
+	staticClients, err := clients.NewStaticClients(config.Clients)
+	if err != nil {
+		return fmt.Errorf("configure static clients: %w", err)
+	}
+	for _, remote := range staticClients.RemoteJWKS() {
+		// Each loader gets its own context so the group can stop it when
+		// another actor exits, not only when the process context is cancelled.
+		loadCtx, stopLoad := context.WithCancel(ctx)
+		g.Add(func() error { return remote.Run(loadCtx) }, func(error) { stopLoad() })
+	}
+	multiClients := clients.NewMultiClients(staticClients,
 		&clients.DynamicClients{DB: dynamicClientStore},
 	)
 

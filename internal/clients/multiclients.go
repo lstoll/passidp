@@ -67,9 +67,11 @@ func (m *MultiClients) ClientOpts(ctx context.Context, clientID string) ([]oauth
 
 // ClientSecrets implements oauth2as.ClientSource
 func (m *MultiClients) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
-	// Check static clients first
-	if secrets, err := m.Static.ClientSecrets(ctx, clientID); err == nil && len(secrets) > 0 {
-		return secrets, nil
+	// Static clients own their authentication mode even when they have no
+	// secret. Falling through could let a same-ID dynamic client turn a
+	// private_key_jwt client into secret authentication.
+	if _, found := m.Static.GetClient(clientID); found {
+		return m.Static.ClientSecrets(ctx, clientID)
 	}
 
 	// Then check dynamic clients

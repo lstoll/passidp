@@ -18,6 +18,28 @@ mkcert -cert-file=dev-cert.pem -key-file=dev-key.pem localhost
 
 Create a configuration file (e.g., `etc/config.hujson`) based on the example:
 
+Static confidential clients can authenticate with `private_key_jwt`. Configure
+either `clientJWTPublicKeys` or `jwksURL` in place of `clientSecrets`:
+
+```json
+{
+  "id": "service-client",
+  "redirectURLs": ["https://client.example/callback"],
+  "clientJWTPublicKeys": [
+    {"pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n", "kid": "current-key"}
+  ]
+}
+```
+
+Each PEM entry is one PKIX public key. `kid` is optional; if omitted, the
+server derives an RFC 7638 SHA-256 key thumbprint. A remote keyset uses
+`"jwksURL": "https://client.example/jwks.json"` instead; it must be an https
+URL. The server loads it in the background, so startup doesn't wait on the
+client's key host. Until the first fetch succeeds, that client's token requests
+fail with `invalid_client`. The server keeps the keys refreshed and retains the
+last valid keys if a refresh fails. These authentication modes cannot be combined with
+`public` or `clientSecrets`.
+
 ### 3. Start the Server
 
 On the server host:

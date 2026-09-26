@@ -7,6 +7,11 @@ type Client struct {
 	// Secrets is a list of valid client secrets for this client. At least
 	// one secret is required, unless the client is Public and uses PKCE.
 	Secrets []string `json:"clientSecrets"`
+	// ClientJWTPublicKeys are public keys accepted for private_key_jwt
+	// authentication. Each PEM must contain one PKIX PUBLIC KEY block.
+	ClientJWTPublicKeys []ClientJWTKey `json:"clientJWTPublicKeys,omitempty"`
+	// JWKSURL is a remote JWKS used for private_key_jwt authentication.
+	JWKSURL string `json:"jwksURL,omitempty"`
 	// RedirectURLS is a list of valid redirect URLs for this client. At least
 	// one is required These are an exact match, with the exception of localhost
 	// being able to use any port. The loopback address must be used, the
@@ -46,4 +51,11 @@ type Client struct {
 	// field that will be converted automatically to an AuthorizationPolicy. Both can not be
 	// specified at the same time.œ
 	RequiredGroups []string `json:"requiredGroups"`
+}
+
+// ClientJWTKey configures one public key accepted for private_key_jwt.
+// KeyID is optional; when omitted, the RFC 7638 thumbprint is used.
+type ClientJWTKey struct {
+	PEM   string `json:"pem"`
+	KeyID string `json:"kid,omitempty"`
 }

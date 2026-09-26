@@ -56,6 +56,24 @@ func TestMultiClients_GetClient(t *testing.T) {
 	}
 }
 
+func TestMultiClientsStaticJWTDoesNotFallBackToDynamicSecret(t *testing.T) {
+	db := setupTestDB(t)
+	req := defaultTestClientRequest()
+	createTestDynamicClient(t, db, "same-client", req)
+	multi := NewMultiClients(&StaticClients{Clients: []config.Client{{
+		ID:                  "same-client",
+		ClientJWTPublicKeys: []config.ClientJWTKey{{PEM: "configured by constructor"}},
+	}}}, &DynamicClients{DB: db})
+
+	secrets, err := multi.ClientSecrets(context.Background(), "same-client")
+	if err != nil {
+		t.Fatalf("ClientSecrets: %v", err)
+	}
+	if len(secrets) != 0 {
+		t.Fatalf("static JWT client inherited dynamic client secrets: %v", secrets)
+	}
+}
+
 func TestMultiClients_IsValidClientID(t *testing.T) {
 	staticClients := &StaticClients{
 		Clients: []config.Client{

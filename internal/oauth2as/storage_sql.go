@@ -8,130 +8,42 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"regexp"
 	"strings"
 	"time"
 )
 
-// SQLDialect identifies a supported database/sql dialect.
-type SQLDialect string
-
+// Fixed table and index names. These are persisted in existing databases and
+// must not change.
 const (
-	// SQLDialectPostgreSQL selects PostgreSQL-compatible SQL.
-	SQLDialectPostgreSQL SQLDialect = "postgresql"
-	// SQLDialectSQLite selects SQLite-compatible SQL.
-	SQLDialectSQLite SQLDialect = "sqlite"
+	tblSchemaMigrations = "oauth2as_schema_migrations"
+	tblGrants           = "oauth2as_grants"
+	tblAuthCodes        = "oauth2as_authorization_codes"
+	tblRefreshTokens    = "oauth2as_refresh_tokens"
+	tblRefreshSessions  = "oauth2as_refresh_sessions"
+	idxGrantOwner       = "oauth2as_grant_owner_idx"
+	idxGrantExpiry      = "oauth2as_grant_expiry_idx"
+	idxCodeExpiry       = "oauth2as_code_expiry_idx"
+	idxCodeGrant        = "oauth2as_code_grant_idx"
+	idxTokenExpiry      = "oauth2as_token_expiry_idx"
+	idxTokenGrant       = "oauth2as_token_grant_idx"
+	idxSessionActive    = "oauth2as_session_active_idx"
 )
-
-// SQLStorageOptions configures SQL-backed storage.
-type SQLStorageOptions struct {
-	// Dialect selects the SQL dialect and is required.
-	Dialect SQLDialect
-	// TablePrefix prefixes every table and index. It defaults to "oauth2as".
-	TablePrefix string
-}
-
-var sqlTablePrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-type sqlNames struct {
-	prefix           string
-	schemaMigrations string
-	grants           string
-	authCodes        string
-	refreshTokens    string
-	refreshSessions  string
-	grantOwnerIndex  string
-	grantExpiryIdx   string
-	codeExpiryIdx    string
-	codeGrantIdx     string
-	tokenExpiryIdx   string
-	tokenGrantIdx    string
-	sessionActive    string
-}
-
-func makeSQLNames(prefix string, dialect SQLDialect) (sqlNames, error) {
-	if prefix == "" {
-		prefix = "oauth2as"
-	}
-	if !sqlTablePrefixPattern.MatchString(prefix) {
-		return sqlNames{}, fmt.Errorf("oauth2as: invalid SQL table prefix %q", prefix)
-	}
-	n := sqlNames{
-		prefix:           prefix,
-		schemaMigrations: prefix + "_schema_migrations",
-		grants:           prefix + "_grants",
-		authCodes:        prefix + "_authorization_codes",
-		refreshTokens:    prefix + "_refresh_tokens",
-		refreshSessions:  prefix + "_refresh_sessions",
-		grantOwnerIndex:  prefix + "_grant_owner_idx",
-		grantExpiryIdx:   prefix + "_grant_expiry_idx",
-		codeExpiryIdx:    prefix + "_code_expiry_idx",
-		codeGrantIdx:     prefix + "_code_grant_idx",
-		tokenExpiryIdx:   prefix + "_token_expiry_idx",
-		tokenGrantIdx:    prefix + "_token_grant_idx",
-		sessionActive:    prefix + "_session_active_idx",
-	}
-	if dialect == SQLDialectPostgreSQL {
-		for _, identifier := range []string{
-			n.schemaMigrations, n.grants, n.authCodes, n.refreshTokens, n.refreshSessions,
-			n.grantOwnerIndex, n.grantExpiryIdx, n.codeExpiryIdx, n.codeGrantIdx,
-			n.tokenExpiryIdx, n.tokenGrantIdx, n.sessionActive,
-		} {
-			if len(identifier) > 63 {
-				return sqlNames{}, fmt.Errorf("oauth2as: SQL identifier %q exceeds PostgreSQL's 63-byte limit", identifier)
-			}
-		}
-	}
-	return n, nil
-}
 
 type sqlStorage struct {
 	db         *sql.DB
-	dialect    SQLDialect
-	names      sqlNames
 	migrations []sqlMigration
 }
 
 var _ storageBackend = (*sqlStorage)(nil)
 
-// NewSQLStorage returns relational storage backed by db. It does not connect
-// to the database or apply migrations. Call [Storage.Migrate] before serving
+// NewSQLStorage returns SQLite-backed storage using db. It does not connect to
+// the database or apply migrations. Call [Storage.Migrate] before serving
 // traffic.
-func NewSQLStorage(db *sql.DB, options SQLStorageOptions) (*Storage, error) {
+func NewSQLStorage(db *sql.DB) (*Storage, error) {
 	if db == nil {
 		return nil, errors.New("oauth2as: SQL database is required")
 	}
-	if options.Dialect != SQLDialectPostgreSQL && options.Dialect != SQLDialectSQLite {
-		return nil, fmt.Errorf("oauth2as: unsupported SQL dialect %q", options.Dialect)
-	}
-	names, err := makeSQLNames(options.TablePrefix, options.Dialect)
-	if err != nil {
-		return nil, err
-	}
-	return &Storage{backend: &sqlStorage{
-		db:         db,
-		dialect:    options.Dialect,
-		names:      names,
-		migrations: sqlMigrations(options.Dialect, names),
-	}}, nil
-}
-
-func (s *sqlStorage) bind(query string) string {
-	if s.dialect != SQLDialectPostgreSQL {
-		return query
-	}
-	var b strings.Builder
-	arg := 1
-	for _, r := range query {
-		if r == '?' {
-			fmt.Fprintf(&b, "$%d", arg)
-			arg++
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return &Storage{backend: &sqlStorage{db: db, migrations: sqlMigrations()}}, nil
 }
 
 func (s *sqlStorage) conn(ctx context.Context) (*sql.Conn, error) {
@@ -139,11 +51,9 @@ func (s *sqlStorage) conn(ctx context.Context) (*sql.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.dialect == SQLDialectSQLite {
-		if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("enable SQLite foreign keys: %w", err)
-		}
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("enable SQLite foreign keys: %w", err)
 	}
 	return conn, nil
 }
@@ -223,9 +133,7 @@ func (s *sqlStorage) scanGrant(ctx context.Context, q sqlQueryer, id string) (st
 		grant   storedGrant
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, s.bind(
-		"SELECT user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version FROM "+s.names.grants+" WHERE id = ?",
-	), id).Scan(
+	err := q.QueryRowContext(ctx, "SELECT user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version FROM "+tblGrants+" WHERE id = ?", id).Scan(
 		&grant.UserID, &grant.ClientID, jsonArray(&grant.GrantedScopes), jsonOf(&grant.Request),
 		s.timeOf(&grant.GrantedAt), s.nullTime(&grant.AuthenticatedAt), s.timeOf(&grant.ExpiresAt),
 		jsonOf(&grant.AdditionalState), nullOf(&grant.Metadata), nullOf(&grant.EncryptedMetadata),
@@ -242,9 +150,7 @@ func (s *sqlStorage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) 
 		code    storedAuthCode
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, s.bind(
-		"SELECT grant_id, code, valid_until, delete_after, encrypted_grant_key, version FROM "+s.names.authCodes+" WHERE id = ?",
-	), id).Scan(&code.GrantID, &code.Code, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), nullOf(&code.EncryptedGrantKey), &version)
+	err := q.QueryRowContext(ctx, "SELECT grant_id, code, valid_until, delete_after, encrypted_grant_key, version FROM "+tblAuthCodes+" WHERE id = ?", id).Scan(&code.GrantID, &code.Code, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), nullOf(&code.EncryptedGrantKey), &version)
 	if err != nil {
 		return storedAuthCode{}, 0, err
 	}
@@ -256,9 +162,7 @@ func (s *sqlStorage) scanRefreshToken(ctx context.Context, q sqlQueryer, id stri
 		token   storedRefreshToken
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, s.bind(
-		"SELECT grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version FROM "+s.names.refreshTokens+" WHERE id = ?",
-	), id).Scan(&token.GrantID, &token.Token, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), nullOf(&token.ReplacedByTokenID), nullOf(&token.EncryptedGrantKey), &version)
+	err := q.QueryRowContext(ctx, "SELECT grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version FROM "+tblRefreshTokens+" WHERE id = ?", id).Scan(&token.GrantID, &token.Token, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), nullOf(&token.ReplacedByTokenID), nullOf(&token.EncryptedGrantKey), &version)
 	if err != nil {
 		return storedRefreshToken{}, 0, err
 	}
@@ -304,7 +208,7 @@ func (s *sqlStorage) commitOnce(ctx context.Context, commit storageCommit) error
 
 	versions := make(map[storageRef]uint64, len(commit.Checks)+len(commit.Grants)+len(commit.AuthCodes)+len(commit.RefreshTokens)+len(commit.Sessions))
 	for _, check := range commit.Checks {
-		version, exists, err := s.version(ctx, tx, check.ref(), true)
+		version, exists, err := s.version(ctx, tx, check.ref())
 		if err != nil {
 			return err
 		}
@@ -383,27 +287,11 @@ func (s *sqlStorage) commitOnce(ctx context.Context, commit storageCommit) error
 	return nil
 }
 
-type sqlStateError interface {
-	error
-	SQLState() string
-}
-
 func uniqueViolation(err error) bool {
-	var state sqlStateError
-	if errors.As(err, &state) && state.SQLState() == "23505" {
-		return true
-	}
 	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
 }
 
 func retryableSQLError(err error) bool {
-	var state sqlStateError
-	if errors.As(err, &state) { //nolint:modernize // AsType cannot target a capability interface on Go 1.27.
-		switch state.SQLState() {
-		case "40001", "40P01":
-			return true
-		}
-	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "database is locked") ||
 		strings.Contains(message, "database table is locked") ||
@@ -414,7 +302,7 @@ func (s *sqlStorage) putVersion(ctx context.Context, tx *sql.Tx, versions map[st
 	if version, ok := versions[ref]; ok {
 		return version + 1, nil
 	}
-	version, exists, err := s.version(ctx, tx, ref, true)
+	version, exists, err := s.version(ctx, tx, ref)
 	if err != nil {
 		return 0, err
 	}
@@ -424,17 +312,14 @@ func (s *sqlStorage) putVersion(ctx context.Context, tx *sql.Tx, versions map[st
 	return version + 1, nil
 }
 
-func (s *sqlStorage) version(ctx context.Context, tx *sql.Tx, ref storageRef, lock bool) (uint64, bool, error) {
+func (s *sqlStorage) version(ctx context.Context, tx *sql.Tx, ref storageRef) (uint64, bool, error) {
 	table, idColumn, err := s.tableForKind(ref.Kind)
 	if err != nil {
 		return 0, false, err
 	}
 	query := "SELECT version FROM " + table + " WHERE " + idColumn + " = ?"
-	if lock && s.dialect == SQLDialectPostgreSQL {
-		query += " FOR UPDATE"
-	}
 	var version uint64
-	err = tx.QueryRowContext(ctx, s.bind(query), ref.ID).Scan(&version)
+	err = tx.QueryRowContext(ctx, query, ref.ID).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -444,13 +329,13 @@ func (s *sqlStorage) version(ctx context.Context, tx *sql.Tx, ref storageRef, lo
 func (s *sqlStorage) tableForKind(kind storageKind) (table, idColumn string, err error) {
 	switch kind {
 	case storageKindGrant:
-		return s.names.grants, "id", nil
+		return tblGrants, "id", nil
 	case storageKindAuthCode:
-		return s.names.authCodes, "id", nil
+		return tblAuthCodes, "id", nil
 	case storageKindRefreshToken:
-		return s.names.refreshTokens, "id", nil
+		return tblRefreshTokens, "id", nil
 	case storageKindSession:
-		return s.names.refreshSessions, "grant_id", nil
+		return tblRefreshSessions, "grant_id", nil
 	default:
 		return "", "", fmt.Errorf("oauth2as: unsupported storage kind %q", kind)
 	}
@@ -458,8 +343,8 @@ func (s *sqlStorage) tableForKind(kind storageKind) (table, idColumn string, err
 
 func (s *sqlStorage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+s.names.grants+" (id, user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+s.names.grants+" SET user_id = ?, client_id = ?, granted_scopes = ?, request = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, additional_state = ?, metadata = ?, encrypted_metadata = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
+		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, request = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, additional_state = ?, metadata = ?, encrypted_metadata = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
 		[]any{
 			value.ID, value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), jsonOf(&value.Request), s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt),
 			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState), nullOf(&value.Metadata), nullOf(&value.EncryptedMetadata),
@@ -474,24 +359,24 @@ func (s *sqlStorage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant
 
 func (s *sqlStorage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+s.names.authCodes+" (id, grant_id, code, valid_until, delete_after, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+s.names.authCodes+" SET grant_id = ?, code = ?, valid_until = ?, delete_after = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
+		"INSERT INTO "+tblAuthCodes+" (id, grant_id, code, valid_until, delete_after, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblAuthCodes+" SET grant_id = ?, code = ?, valid_until = ?, delete_after = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
 		[]any{value.ID, value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.EncryptedGrantKey), version},
 		[]any{value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.EncryptedGrantKey), version, value.ID})
 }
 
 func (s *sqlStorage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+s.names.refreshTokens+" (id, grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+s.names.refreshTokens+" SET grant_id = ?, token = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
+		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, token = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
 		[]any{value.ID, value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), nullOf(&value.EncryptedGrantKey), version},
 		[]any{value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), nullOf(&value.EncryptedGrantKey), version, value.ID})
 }
 
 func (s *sqlStorage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+s.names.refreshSessions+" (grant_id, expires_at, last_used_at, version) VALUES (?, ?, ?, ?)",
-		"UPDATE "+s.names.refreshSessions+" SET expires_at = ?, last_used_at = ?, version = ? WHERE grant_id = ?",
+		"INSERT INTO "+tblRefreshSessions+" (grant_id, expires_at, last_used_at, version) VALUES (?, ?, ?, ?)",
+		"UPDATE "+tblRefreshSessions+" SET expires_at = ?, last_used_at = ?, version = ? WHERE grant_id = ?",
 		[]any{value.GrantID, s.timeOf(&value.ExpiresAt), s.timeOf(&value.LastUsedAt), version},
 		[]any{s.timeOf(&value.ExpiresAt), s.timeOf(&value.LastUsedAt), version, value.GrantID})
 }
@@ -501,7 +386,7 @@ func (s *sqlStorage) upsert(ctx context.Context, tx *sql.Tx, exists bool, insert
 	if exists {
 		query, args = update, updateArgs
 	}
-	_, err := tx.ExecContext(ctx, s.bind(query), args...)
+	_, err := tx.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -510,7 +395,7 @@ func (s *sqlStorage) deleteRef(ctx context.Context, tx *sql.Tx, ref storageRef) 
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, s.bind("DELETE FROM "+table+" WHERE "+idColumn+" = ?"), ref.ID)
+	_, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+idColumn+" = ?", ref.ID)
 	return err
 }
 
@@ -522,7 +407,7 @@ func (s *sqlStorage) ListRefreshSessions(ctx context.Context, query storageRefre
 	defer conn.Close()
 
 	statement := "SELECT rs.grant_id, g.user_id, g.client_id, g.granted_scopes, g.granted_at, g.authenticated_at, rs.expires_at, rs.last_used_at FROM " +
-		s.names.refreshSessions + " rs JOIN " + s.names.grants + " g ON g.id = rs.grant_id WHERE g.user_id = ? AND rs.expires_at > ?"
+		tblRefreshSessions + " rs JOIN " + tblGrants + " g ON g.id = rs.grant_id WHERE g.user_id = ? AND rs.expires_at > ?"
 	args := []any{query.UserID, s.timeOf(&query.ActiveAt)}
 	if query.ClientID != "" {
 		statement += " AND g.client_id = ?"
@@ -536,7 +421,7 @@ func (s *sqlStorage) ListRefreshSessions(ctx context.Context, query storageRefre
 	statement += " ORDER BY rs.last_used_at DESC, rs.grant_id ASC LIMIT ?"
 	args = append(args, query.Limit)
 
-	rows, err := conn.QueryContext(ctx, s.bind(statement), args...)
+	rows, err := conn.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -577,17 +462,17 @@ func (s *sqlStorage) Cleanup(ctx context.Context, options CleanupOptions) (Clean
 	for _, target := range []struct {
 		table, id, expiry string
 	}{
-		{s.names.refreshSessions, "grant_id", "expires_at"},
-		{s.names.authCodes, "id", "delete_after"},
-		{s.names.refreshTokens, "id", "delete_after"},
-		{s.names.grants, "id", "expires_at"},
+		{tblRefreshSessions, "grant_id", "expires_at"},
+		{tblAuthCodes, "id", "delete_after"},
+		{tblRefreshTokens, "id", "delete_after"},
+		{tblGrants, "id", "expires_at"},
 	} {
 		if remaining == 0 {
 			break
 		}
 		query := "DELETE FROM " + target.table + " WHERE " + target.id + " IN (SELECT " + target.id +
 			" FROM " + target.table + " WHERE " + target.expiry + " <= ? ORDER BY " + target.expiry + " LIMIT ?)"
-		result, err := tx.ExecContext(ctx, s.bind(query), cutoff, remaining)
+		result, err := tx.ExecContext(ctx, query, cutoff, remaining)
 		if err != nil {
 			return CleanupResult{}, err
 		}
@@ -610,13 +495,13 @@ func (s *sqlStorage) Cleanup(ctx context.Context, options CleanupOptions) (Clean
 
 func (s *sqlStorage) hasExpired(ctx context.Context, tx *sql.Tx, cutoff any) (bool, error) {
 	query := "SELECT EXISTS (" +
-		"SELECT 1 FROM " + s.names.refreshSessions + " WHERE expires_at <= ? " +
-		"UNION ALL SELECT 1 FROM " + s.names.authCodes + " WHERE delete_after <= ? " +
-		"UNION ALL SELECT 1 FROM " + s.names.refreshTokens + " WHERE delete_after <= ? " +
-		"UNION ALL SELECT 1 FROM " + s.names.grants + " WHERE expires_at <= ?" +
+		"SELECT 1 FROM " + tblRefreshSessions + " WHERE expires_at <= ? " +
+		"UNION ALL SELECT 1 FROM " + tblAuthCodes + " WHERE delete_after <= ? " +
+		"UNION ALL SELECT 1 FROM " + tblRefreshTokens + " WHERE delete_after <= ? " +
+		"UNION ALL SELECT 1 FROM " + tblGrants + " WHERE expires_at <= ?" +
 		")"
 	var exists bool
-	err := tx.QueryRowContext(ctx, s.bind(query), cutoff, cutoff, cutoff, cutoff).Scan(&exists)
+	err := tx.QueryRowContext(ctx, query, cutoff, cutoff, cutoff, cutoff).Scan(&exists)
 	return exists, err
 }
 
@@ -661,22 +546,15 @@ func (s *sqlStorage) migrateOnce(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 
-	if s.dialect == SQLDialectPostgreSQL {
-		if _, err := tx.ExecContext(ctx, s.bind("SELECT pg_advisory_xact_lock(?)"), migrateLockKey(s.names.prefix)); err != nil {
-			return fmt.Errorf("lock schema migrations: %w", err)
-		}
-	}
-
-	_, _, _, ts := sqlColumnTypes(s.dialect)
-	if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS "+s.names.schemaMigrations+" ("+
+	if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS "+tblSchemaMigrations+" ("+
 		"version BIGINT PRIMARY KEY, "+
 		"name TEXT NOT NULL, "+
-		"applied_at "+ts+" NOT NULL"+
+		"applied_at TEXT NOT NULL"+
 		")"); err != nil {
 		return fmt.Errorf("create schema migrations table: %w", err)
 	}
 
-	rows, err := tx.QueryContext(ctx, "SELECT version FROM "+s.names.schemaMigrations)
+	rows, err := tx.QueryContext(ctx, "SELECT version FROM "+tblSchemaMigrations)
 	if err != nil {
 		return err
 	}
@@ -715,38 +593,24 @@ func (s *sqlStorage) migrateOnce(ctx context.Context) error {
 				return fmt.Errorf("apply migration %d %s: %w", migration.version, migration.name, err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, s.bind(
-			"INSERT INTO "+s.names.schemaMigrations+" (version, name, applied_at) VALUES (?, ?, ?)",
-		), migration.version, migration.name, s.timeOf(&now)); err != nil {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO "+tblSchemaMigrations+" (version, name, applied_at) VALUES (?, ?, ?)",
+			migration.version, migration.name, s.timeOf(&now)); err != nil {
 			return fmt.Errorf("record migration %d %s: %w", migration.version, migration.name, err)
 		}
 	}
 	return tx.Commit()
 }
 
-func migrateLockKey(prefix string) int64 {
-	sum := fnv.New64a()
-	_, _ = sum.Write([]byte("oauth2as-migrate:"))
-	_, _ = sum.Write([]byte(prefix))
-	return int64(sum.Sum64())
-}
-
-func sqlColumnTypes(dialect SQLDialect) (blob, js, id, ts string) {
-	if dialect == SQLDialectPostgreSQL {
-		return "BYTEA", "JSONB", "UUID", "TIMESTAMPTZ"
-	}
+func sqlMigrations() []sqlMigration {
 	// SQLite has no UUID or timestamptz. TEXT IDs store canonical UUID
 	// strings; TEXT timestamps use sqliteTimeFormat so they sort in time order.
-	return "BLOB", "JSON", "TEXT", "TEXT"
-}
-
-func sqlMigrations(dialect SQLDialect, n sqlNames) []sqlMigration {
-	blob, js, id, ts := sqlColumnTypes(dialect)
+	const blob, js, id, ts = "BLOB", "JSON", "TEXT", "TEXT"
 	return []sqlMigration{{
 		version: 1,
 		name:    "initial_schema",
 		up: []string{
-			"CREATE TABLE " + n.grants + " (" +
+			"CREATE TABLE " + tblGrants + " (" +
 				"id " + id + " PRIMARY KEY, " +
 				"user_id TEXT NOT NULL, " +
 				"client_id TEXT NOT NULL, " +
@@ -762,22 +626,22 @@ func sqlMigrations(dialect SQLDialect, n sqlNames) []sqlMigration {
 				"amr " + js + ", " +
 				"version BIGINT NOT NULL CHECK (version > 0)" +
 				")",
-			"CREATE INDEX " + n.grantOwnerIndex + " ON " + n.grants + " (user_id, client_id, id)",
-			"CREATE INDEX " + n.grantExpiryIdx + " ON " + n.grants + " (expires_at)",
-			"CREATE TABLE " + n.authCodes + " (" +
+			"CREATE INDEX " + idxGrantOwner + " ON " + tblGrants + " (user_id, client_id, id)",
+			"CREATE INDEX " + idxGrantExpiry + " ON " + tblGrants + " (expires_at)",
+			"CREATE TABLE " + tblAuthCodes + " (" +
 				"id " + id + " PRIMARY KEY, " +
-				"grant_id " + id + " NOT NULL REFERENCES " + n.grants + "(id) ON DELETE CASCADE, " +
+				"grant_id " + id + " NOT NULL REFERENCES " + tblGrants + "(id) ON DELETE CASCADE, " +
 				"code " + blob + " NOT NULL, " +
 				"valid_until " + ts + " NOT NULL, " +
 				"delete_after " + ts + " NOT NULL, " +
 				"encrypted_grant_key " + blob + ", " +
 				"version BIGINT NOT NULL CHECK (version > 0)" +
 				")",
-			"CREATE INDEX " + n.codeExpiryIdx + " ON " + n.authCodes + " (delete_after)",
-			"CREATE INDEX " + n.codeGrantIdx + " ON " + n.authCodes + " (grant_id)",
-			"CREATE TABLE " + n.refreshTokens + " (" +
+			"CREATE INDEX " + idxCodeExpiry + " ON " + tblAuthCodes + " (delete_after)",
+			"CREATE INDEX " + idxCodeGrant + " ON " + tblAuthCodes + " (grant_id)",
+			"CREATE TABLE " + tblRefreshTokens + " (" +
 				"id " + id + " PRIMARY KEY, " +
-				"grant_id " + id + " NOT NULL REFERENCES " + n.grants + "(id) ON DELETE CASCADE, " +
+				"grant_id " + id + " NOT NULL REFERENCES " + tblGrants + "(id) ON DELETE CASCADE, " +
 				"token " + blob + " NOT NULL, " +
 				"valid_until " + ts + " NOT NULL, " +
 				"delete_after " + ts + " NOT NULL, " +
@@ -785,15 +649,15 @@ func sqlMigrations(dialect SQLDialect, n sqlNames) []sqlMigration {
 				"encrypted_grant_key " + blob + ", " +
 				"version BIGINT NOT NULL CHECK (version > 0)" +
 				")",
-			"CREATE INDEX " + n.tokenExpiryIdx + " ON " + n.refreshTokens + " (delete_after)",
-			"CREATE INDEX " + n.tokenGrantIdx + " ON " + n.refreshTokens + " (grant_id)",
-			"CREATE TABLE " + n.refreshSessions + " (" +
-				"grant_id " + id + " PRIMARY KEY REFERENCES " + n.grants + "(id) ON DELETE CASCADE, " +
+			"CREATE INDEX " + idxTokenExpiry + " ON " + tblRefreshTokens + " (delete_after)",
+			"CREATE INDEX " + idxTokenGrant + " ON " + tblRefreshTokens + " (grant_id)",
+			"CREATE TABLE " + tblRefreshSessions + " (" +
+				"grant_id " + id + " PRIMARY KEY REFERENCES " + tblGrants + "(id) ON DELETE CASCADE, " +
 				"expires_at " + ts + " NOT NULL, " +
 				"last_used_at " + ts + " NOT NULL, " +
 				"version BIGINT NOT NULL CHECK (version > 0)" +
 				")",
-			"CREATE INDEX " + n.sessionActive + " ON " + n.refreshSessions + " (expires_at, last_used_at, grant_id)",
+			"CREATE INDEX " + idxSessionActive + " ON " + tblRefreshSessions + " (expires_at, last_used_at, grant_id)",
 		},
 	}}
 }
@@ -811,11 +675,11 @@ func nullOf[T ~string | ~[]byte](v *T) *sqlNull[T] {
 }
 
 func (s *sqlStorage) timeOf(t *time.Time) *sqlTime {
-	return &sqlTime{t: t, dialect: s.dialect}
+	return &sqlTime{t: t}
 }
 
 func (s *sqlStorage) nullTime(t *time.Time) *sqlTime {
-	return &sqlTime{t: t, dialect: s.dialect, nullable: true}
+	return &sqlTime{t: t, nullable: true}
 }
 
 type sqlJSON[T any] struct {
@@ -930,7 +794,6 @@ func (n *sqlNull[T]) Value() (driver.Value, error) {
 
 type sqlTime struct {
 	t        *time.Time
-	dialect  SQLDialect
 	nullable bool
 }
 
@@ -971,9 +834,5 @@ func (t *sqlTime) Value() (driver.Value, error) {
 	if t == nil || t.t == nil || (t.nullable && t.t.IsZero()) {
 		return nil, nil
 	}
-	tt := truncateTime(*t.t)
-	if t.dialect == SQLDialectSQLite {
-		return tt.Format(sqliteTimeFormat), nil
-	}
-	return tt, nil
+	return truncateTime(*t.t).Format(sqliteTimeFormat), nil
 }

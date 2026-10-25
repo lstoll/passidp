@@ -2,23 +2,10 @@ package oauth2as
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 )
-
-func TestSQLStorageTablePrefix(t *testing.T) {
-	for _, prefix := range []string{"UPPER", "has-hyphen", strings.Repeat("a", 64)} {
-		if _, err := NewSQLStorage(new(sql.DB), SQLStorageOptions{
-			Dialect:     SQLDialectPostgreSQL,
-			TablePrefix: prefix,
-		}); err == nil {
-			t.Errorf("invalid table prefix %q accepted", prefix)
-		}
-	}
-}
 
 func TestMemoryStorageCleanup(t *testing.T) {
 	store := NewMemoryStorage()

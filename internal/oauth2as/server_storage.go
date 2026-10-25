@@ -87,7 +87,7 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 	}
 
 	// StorageExpiresAt is only a cleanup horizon; ValidUntil is the protocol
-	// lifetime and must always be enforced by the library.
+	// lifetime and must always be enforced by this package.
 	now := s.now()
 	if !storedCode.ValidUntil.After(now) || !storedCode.StorageExpiresAt.After(now) {
 		return nil, errGrantExpired

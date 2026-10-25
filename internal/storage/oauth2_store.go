@@ -12,12 +12,10 @@ import (
 
 const oauth2asGrantsTable = "oauth2as_grants"
 
-// NewOAuth2Storage returns oauth2ext SQL storage on the shared SQLite database
+// NewOAuth2Storage returns oauth2as SQL storage on the shared SQLite database
 // and applies its schema migrations.
 func NewOAuth2Storage(ctx context.Context, db *sql.DB) (*oauth2as.Storage, error) {
-	store, err := oauth2as.NewSQLStorage(db, oauth2as.SQLStorageOptions{
-		Dialect: oauth2as.SQLDialectSQLite,
-	})
+	store, err := oauth2as.NewSQLStorage(db)
 	if err != nil {
 		return nil, err
 	}

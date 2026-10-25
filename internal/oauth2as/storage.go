@@ -110,7 +110,7 @@ type storedGrant struct {
 	ExpiresAt time.Time `json:"expiresAt,omitzero"`
 
 	// AdditionalState contains private protocol state encoded inside the
-	// library-owned grant record.
+	// package-owned grant record.
 	AdditionalState json.RawMessage `json:"additionalState,omitzero"`
 
 	// Metadata stores unencrypted application-specific data that can be accessed
@@ -157,7 +157,7 @@ type storageBackend interface {
 }
 
 // Storage is an opaque authorization-server storage implementation. Construct
-// one with [NewSQLStorage] or [NewMemoryStorage]. A Storage must be dedicated to
+// one with [NewSQLStorage] (SQLite) or [NewMemoryStorage]. A Storage must be dedicated to
 // one issuer.
 type Storage struct {
 	backend storageBackend

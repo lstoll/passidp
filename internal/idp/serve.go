@@ -77,7 +77,6 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 	enrollmentStore := storage.NewEnrollmentStore(sqlDB)
 	dynamicClientStore := storage.NewDynamicClientStore(sqlDB)
 	dpopReplayStore := storage.NewDPoPReplayStore(sqlDB)
-	oauth2Grants := storage.NewOAuth2Grants(sqlDB)
 
 	g.Add(storage.OAuth2GarbageCollector(oauth2Store, 1*time.Hour))
 	g.Add(storage.SessionGarbageCollector(sessionKV, 1*time.Hour))
@@ -111,7 +110,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 		return fmt.Errorf("apply passkey user config: %w", err)
 	}
 
-	idph, err := NewIDP(ctx, &g, config, credStore, oauth2Store, sessionKV, keysetStore, enrollmentStore, dpopReplayStore, oauth2Grants, config.ParsedIssuer, multiClients)
+	idph, err := NewIDP(ctx, &g, config, credStore, oauth2Store, sessionKV, keysetStore, enrollmentStore, dpopReplayStore, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
@@ -180,7 +179,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 }
 
 // NewIDP creates a new IDP server for the given params.
-func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *storage.CredentialFile, oauth2 *oauth2as.Storage, sessionKV session.KV, keysetStore keyset.AdminStore, enrollments *storage.EnrollmentStore, dpopReplay dpop.ReplayStore, oauth2Grants *storage.OAuth2Grants, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
+func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *storage.CredentialFile, oauth2 *oauth2as.Storage, sessionKV session.KV, keysetStore keyset.AdminStore, enrollments *storage.EnrollmentStore, dpopReplay dpop.ReplayStore, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
 	oidcSigner, oidcKeys, sessionMAC, err := initKeysets(ctx, keysetStore)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
@@ -273,10 +272,9 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	}
 
 	auth := &auth.Authenticator{
-		Passkey:      rp,
-		CredStore:    credStore,
-		OAuth2Grants: oauth2Grants,
-		Config:       cfg,
+		Passkey:   rp,
+		CredStore: credStore,
+		Config:    cfg,
 	}
 	auth.AddHandlers(websvr)
 

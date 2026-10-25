@@ -39,6 +39,8 @@ type RefreshSession struct {
 	AuthenticatedAt time.Time
 	ExpiresAt       time.Time
 	LastUsedAt      time.Time
+	// DPoPBound reports whether the grant's tokens are bound to a DPoP key.
+	DPoPBound bool
 }
 
 // RefreshSessionPage is one page of active refresh sessions.
@@ -92,6 +94,7 @@ func (s *Server) ListRefreshSessions(ctx context.Context, query RefreshSessionQu
 			AuthenticatedAt: stored.AuthenticatedAt,
 			ExpiresAt:       stored.ExpiresAt,
 			LastUsedAt:      stored.LastUsedAt,
+			DPoPBound:       stored.DPoPBound,
 		}
 	}
 	if len(found) > limit {

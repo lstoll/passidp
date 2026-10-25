@@ -413,7 +413,7 @@ func (s *sqlStorage) ListRefreshSessions(ctx context.Context, query storageRefre
 	}
 	defer conn.Close()
 
-	statement := "SELECT rs.grant_id, g.user_id, g.client_id, g.granted_scopes, g.granted_at, g.authenticated_at, rs.expires_at, rs.last_used_at FROM " +
+	statement := "SELECT rs.grant_id, g.user_id, g.client_id, g.granted_scopes, g.granted_at, g.authenticated_at, rs.expires_at, rs.last_used_at, g.additional_state FROM " +
 		tblRefreshSessions + " rs JOIN " + tblGrants + " g ON g.id = rs.grant_id WHERE g.user_id = ? AND rs.expires_at > ?"
 	args := []any{query.UserID, s.timeOf(&query.ActiveAt)}
 	if query.ClientID != "" {
@@ -435,13 +435,18 @@ func (s *sqlStorage) ListRefreshSessions(ctx context.Context, query storageRefre
 	defer rows.Close()
 	result := make([]storedRefreshSession, 0, query.Limit)
 	for rows.Next() {
-		var session storedRefreshSession
+		var (
+			session         storedRefreshSession
+			additionalState storedAdditionalState
+		)
 		if err := rows.Scan(
 			&session.GrantID, &session.UserID, &session.ClientID, jsonArray(&session.GrantedScopes),
 			s.timeOf(&session.CreatedAt), s.nullTime(&session.AuthenticatedAt), s.timeOf(&session.ExpiresAt), s.timeOf(&session.LastUsedAt),
+			jsonOf(&additionalState),
 		); err != nil {
 			return nil, err
 		}
+		session.DPoPBound = additionalState.DPoPThumbprint != nil && *additionalState.DPoPThumbprint != ""
 		grant := storedGrant{AuthenticatedAt: session.AuthenticatedAt, GrantedAt: session.CreatedAt}
 		session.AuthenticatedAt = authTimeFromGrant(&grant)
 		result = append(result, session)

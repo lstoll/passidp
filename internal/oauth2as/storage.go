@@ -143,6 +143,7 @@ type storedRefreshSession struct {
 	AuthenticatedAt time.Time
 	ExpiresAt       time.Time
 	LastUsedAt      time.Time
+	DPoPBound       bool
 }
 
 // Storage is an opaque authorization-server storage implementation. Construct

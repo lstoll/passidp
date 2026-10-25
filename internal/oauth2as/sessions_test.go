@@ -2,7 +2,9 @@ package oauth2as
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -163,5 +165,49 @@ func TestCodeExchangeCreatesRefreshSession(t *testing.T) {
 	}
 	if len(page.Sessions) != 0 {
 		t.Fatalf("revoked session still listed: %#v", page)
+	}
+}
+
+func TestListRefreshSessionsDPoPBound(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	store := newTestStorage(t)
+	server := &Server{config: Config{Storage: store}, now: func() time.Time { return now }}
+
+	for id, state := range map[string]json.RawMessage{
+		"bound":   json.RawMessage(`{"dpopThumbprint":"abc"}`),
+		"empty":   json.RawMessage(`{"dpopThumbprint":""}`),
+		"unbound": json.RawMessage(`{}`),
+		"none":    nil,
+	} {
+		if err := store.commit(t.Context(), storageCommit{
+			Checks: []storageCheck{
+				{Kind: storageKindGrant, ID: id},
+				{Kind: storageKindSession, ID: id},
+			},
+			Grants: []storedGrant{{
+				ID:              id,
+				UserID:          "user",
+				ClientID:        "client",
+				GrantedAt:       now,
+				ExpiresAt:       now.Add(time.Hour),
+				AdditionalState: state,
+			}},
+			Sessions: []storedRefreshSession{{GrantID: id, UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour), LastUsedAt: now}},
+		}); err != nil {
+			t.Fatalf("commit %s: %v", id, err)
+		}
+	}
+
+	page, err := server.ListRefreshSessions(t.Context(), RefreshSessionQuery{UserID: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, s := range page.Sessions {
+		got[s.GrantID] = s.DPoPBound
+	}
+	want := map[string]bool{"bound": true, "empty": false, "unbound": false, "none": false}
+	if !maps.Equal(got, want) {
+		t.Fatalf("DPoPBound = %v, want %v", got, want)
 	}
 }

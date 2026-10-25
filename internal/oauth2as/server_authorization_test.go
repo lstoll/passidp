@@ -22,18 +22,18 @@ func TestParseAuthRequest(t *testing.T) {
 				{
 					ID:           "test-client",
 					Secrets:      []string{"test-secret"},
-					RedirectURLs: []string{"https://client.example.com/callback", "https://client.example.com/callback2"},
+					RedirectURIs: []string{"https://client.example.com/callback", "https://client.example.com/callback2"},
 				},
 				{
 					ID:           "single-redirect-client",
 					Secrets:      []string{"single-secret"},
-					RedirectURLs: []string{"https://single.example.com/callback"},
+					RedirectURIs: []string{"https://single.example.com/callback"},
 				},
 				{
 					ID:           "public-client",
 					Secrets:      []string{},
 					Public:       true,
-					RedirectURLs: []string{"https://public.example.com/callback"},
+					RedirectURIs: []string{"https://public.example.com/callback"},
 				},
 			},
 		},
@@ -235,7 +235,7 @@ func TestParseAuthRequestWriteError(t *testing.T) {
 				{
 					ID:           "test-client",
 					Secrets:      []string{"test-secret"},
-					RedirectURLs: []string{"https://client.example.com/callback"},
+					RedirectURIs: []string{"https://client.example.com/callback"},
 				},
 			},
 		},
@@ -286,12 +286,12 @@ func TestGrantAuth(t *testing.T) {
 				{
 					ID:           "test-client",
 					Secrets:      []string{"test-secret"},
-					RedirectURLs: []string{"https://client.example.com/callback"},
+					RedirectURIs: []string{"https://client.example.com/callback"},
 				},
 				{
 					ID:           "multi-redirect-client",
 					Secrets:      []string{"multi-secret"},
-					RedirectURLs: []string{"https://client1.example.com/callback", "https://client2.example.com/callback"},
+					RedirectURIs: []string{"https://client1.example.com/callback", "https://client2.example.com/callback"},
 				},
 			},
 			CodeValidityTime: 10 * time.Minute,
@@ -564,7 +564,7 @@ func TestGrantAuthStoresAuthenticatedAt(t *testing.T) {
 				{
 					ID:           "test-client",
 					Secrets:      []string{"test-secret"},
-					RedirectURLs: []string{"https://client.example.com/callback"},
+					RedirectURIs: []string{"https://client.example.com/callback"},
 				},
 			},
 			CodeValidityTime: 10 * time.Minute,
@@ -633,7 +633,7 @@ func TestAuthRequestIntegration(t *testing.T) {
 				{
 					ID:           "integration-client",
 					Secrets:      []string{"integration-secret"},
-					RedirectURLs: []string{"https://integration.example.com/callback"},
+					RedirectURIs: []string{"https://integration.example.com/callback"},
 				},
 			},
 			CodeValidityTime: 10 * time.Minute,

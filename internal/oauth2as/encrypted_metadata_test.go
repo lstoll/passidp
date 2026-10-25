@@ -55,9 +55,9 @@ func TestEncryptedMetadataFlow(t *testing.T) {
 		{
 			ID:           clientID,
 			Secrets:      []string{clientSecret},
-			RedirectURLs: []string{cliSvr.URL},
+			RedirectURIs: []string{cliSvr.URL},
 			Public:       false,
-			Opts:         []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()},
+			SkipPKCE:     true,
 		},
 	}
 

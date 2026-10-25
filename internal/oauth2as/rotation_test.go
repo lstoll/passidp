@@ -38,8 +38,8 @@ func TestRefreshTokenRotationAndGrace(t *testing.T) {
 			{
 				ID:           clientID,
 				Secrets:      []string{clientSecret},
-				RedirectURLs: []string{"http://localhost/callback"},
-				Opts:         []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()},
+				RedirectURIs: []string{"http://localhost/callback"},
+				SkipPKCE:     true,
 			},
 		},
 		RefreshTokenRotationGracePeriod: 1 * time.Second,
@@ -169,8 +169,8 @@ func TestConcurrentRefreshAttempts(t *testing.T) {
 			{
 				ID:           clientID,
 				Secrets:      []string{clientSecret},
-				RedirectURLs: []string{"http://localhost/callback"},
-				Opts:         []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()},
+				RedirectURIs: []string{"http://localhost/callback"},
+				SkipPKCE:     true,
 			},
 		},
 		RefreshTokenRotationGracePeriod: 1 * time.Second,
@@ -292,8 +292,8 @@ func TestReplacedByTokenIDTracking(t *testing.T) {
 			{
 				ID:           clientID,
 				Secrets:      []string{clientSecret},
-				RedirectURLs: []string{"http://localhost/callback"},
-				Opts:         []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()},
+				RedirectURIs: []string{"http://localhost/callback"},
+				SkipPKCE:     true,
 			},
 		},
 		RefreshTokenRotationGracePeriod: 1 * time.Second,
@@ -428,8 +428,8 @@ func TestEncryptedMetadataWithRotation(t *testing.T) {
 			{
 				ID:           clientID,
 				Secrets:      []string{clientSecret},
-				RedirectURLs: []string{"http://localhost/callback"},
-				Opts:         []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()},
+				RedirectURIs: []string{"http://localhost/callback"},
+				SkipPKCE:     true,
 			},
 		},
 		RefreshTokenValidity: 1 * time.Hour,

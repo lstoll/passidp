@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -98,39 +99,26 @@ func (d *DynamicClients) GetClientMetadata(ctx context.Context, clientID string)
 	return &registration, nil
 }
 
-// IsValidClientID implements oauth2as.ClientSource
-func (d *DynamicClients) IsValidClientID(ctx context.Context, clientID string) (bool, error) {
-	if !strings.HasPrefix(clientID, "dc.") {
-		return false, nil
-	}
-
-	_, err := d.DB.GetDynamicClient(ctx, clientID)
-	return err == nil, nil
-}
-
-// ClientOpts implements oauth2as.ClientSource
-func (d *DynamicClients) ClientOpts(ctx context.Context, clientID string) ([]oauth2as.ClientOpt, error) {
+// Client implements oauth2as.ClientSource. A client that does not exist, has
+// been deactivated, or has expired is reported as (nil, nil); other storage
+// errors are returned.
+func (d *DynamicClients) Client(ctx context.Context, clientID string) (*oauth2as.Client, error) {
 	if !strings.HasPrefix(clientID, "dc.") {
 		return nil, nil
 	}
 
 	client, err := d.DB.GetDynamicClient(ctx, clientID)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, storage.ErrDynamicClientNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get dynamic client %s: %w", clientID, err)
 	}
-
-	var opts []oauth2as.ClientOpt
 
 	// Parse the registration blob to get client details
 	var registration oidcclientreg.ClientRegistrationRequest
 	if err := json.Unmarshal(client.RegistrationBlob, &registration); err != nil {
 		return nil, fmt.Errorf("failed to parse client registration: %w", err)
-	}
-
-	// Check if PKCE should be enforced based on application type and redirect URIs
-	shouldEnforcePKCE := d.shouldEnforcePKCE(registration.ApplicationType, strings.Join(registration.RedirectURIs, ","))
-	if !shouldEnforcePKCE {
-		opts = append(opts, oauth2as.ClientOptSkipPKCE())
 	}
 
 	var signingAlg jwt.Algorithm
@@ -143,9 +131,15 @@ func (d *DynamicClients) ClientOpts(ctx context.Context, clientID string) ([]oau
 		return nil, fmt.Errorf("unsupported ID token signing algorithm %q", registration.IDTokenSignedResponseAlg)
 	}
 
-	opts = append(opts, oauth2as.ClientOptIDTokenSigningAlgorithm(signingAlg))
-
-	return opts, nil
+	return &oauth2as.Client{
+		ID:           clientID,
+		RedirectURIs: registration.RedirectURIs,
+		Secrets:      []string{client.ClientSecret},
+		// Check if PKCE should be enforced based on application type and
+		// redirect URIs.
+		SkipPKCE:                !d.shouldEnforcePKCE(registration.ApplicationType, strings.Join(registration.RedirectURIs, ",")),
+		IDTokenSigningAlgorithm: signingAlg,
+	}, nil
 }
 
 // shouldEnforcePKCE determines if PKCE should be enforced for a client
@@ -187,38 +181,6 @@ func (d *DynamicClients) shouldEnforcePKCE(applicationType, redirectURIs string)
 	}
 
 	return false
-}
-
-func (d *DynamicClients) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
-	if !strings.HasPrefix(clientID, "dc.") {
-		return nil, fmt.Errorf("client %s not found", clientID)
-	}
-
-	client, err := d.DB.GetDynamicClient(ctx, clientID)
-	if err != nil {
-		return nil, fmt.Errorf("client %s not found", clientID)
-	}
-	return []string{client.ClientSecret}, nil
-}
-
-// RedirectURIs implements oauth2as.ClientSource
-func (d *DynamicClients) RedirectURIs(ctx context.Context, clientID string) ([]string, error) {
-	if !strings.HasPrefix(clientID, "dc.") {
-		return nil, fmt.Errorf("client %s not found", clientID)
-	}
-
-	client, err := d.DB.GetDynamicClient(ctx, clientID)
-	if err != nil {
-		return nil, fmt.Errorf("client %s not found", clientID)
-	}
-
-	// Parse the registration blob to get redirect URIs
-	var registration oidcclientreg.ClientRegistrationRequest
-	if err := json.Unmarshal(client.RegistrationBlob, &registration); err != nil {
-		return nil, fmt.Errorf("failed to parse client registration: %w", err)
-	}
-
-	return registration.RedirectURIs, nil
 }
 
 func (d *DynamicClients) registerClient(w http.ResponseWriter, r *http.Request) {

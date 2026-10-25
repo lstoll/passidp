@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"maps"
@@ -71,20 +70,20 @@ func TestCodeToken(t *testing.T) {
 					{
 						ID:           clientID,
 						Secrets:      []string{clientSecret},
-						RedirectURLs: []string{redirectURI},
-						Opts:         []ClientOpt{ClientOptSkipPKCE()},
+						RedirectURIs: []string{redirectURI},
+						SkipPKCE:     true,
 					},
 					{
 						ID:           otherClientID,
 						Secrets:      []string{otherClientSecret},
-						RedirectURLs: []string{otherClientRedirect},
-						Opts:         []ClientOpt{ClientOptSkipPKCE()},
+						RedirectURIs: []string{otherClientRedirect},
+						SkipPKCE:     true,
 					},
 					{
 						ID:           rs256ClientID,
 						Secrets:      []string{rs256ClientSecret},
-						RedirectURLs: []string{rs256ClientRedirect},
-						Opts:         []ClientOpt{ClientOptSkipPKCE(), ClientOptIDTokenSigningAlgorithm(jwt.RS256)},
+						RedirectURIs: []string{rs256ClientRedirect},
+						SkipPKCE:     true, IDTokenSigningAlgorithm: jwt.RS256,
 					},
 				},
 			},
@@ -384,14 +383,14 @@ func TestRefreshToken(t *testing.T) {
 					{
 						ID:           clientID,
 						Secrets:      []string{clientSecret},
-						RedirectURLs: []string{redirectURI},
-						Opts:         []ClientOpt{ClientOptSkipPKCE()},
+						RedirectURIs: []string{redirectURI},
+						SkipPKCE:     true,
 					},
 					{
 						ID:           otherClientID,
 						Secrets:      []string{otherClientSecret},
-						RedirectURLs: []string{otherClientRedirect},
-						Opts:         []ClientOpt{ClientOptSkipPKCE()},
+						RedirectURIs: []string{otherClientRedirect},
+						SkipPKCE:     true,
 					},
 				},
 
@@ -864,7 +863,7 @@ func signTestAccessToken(t *testing.T, signer jwt.Signer, issuer, grantID, clien
 
 func TestValidateTokenClientAllowsPublicClientWithoutSecret(t *testing.T) {
 	server := &Server{config: Config{Clients: staticClientSource{{ID: "public", Public: true}}}}
-	err := server.validateTokenClient(t.Context(), &oauth2proto.TokenRequest{ClientID: "public"}, "public")
+	_, err := server.validateTokenClient(t.Context(), &oauth2proto.TokenRequest{ClientID: "public"}, "public")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -982,55 +981,14 @@ func newCodeGrant(t *testing.T, smgr *Storage) (authCode string) {
 	return newToken.UserToken()
 }
 
-type staticClient struct {
-	ID           string
-	Secrets      []string
-	RedirectURLs []string
-	Public       bool
-	Opts         []ClientOpt
-}
+// staticClientSource is a test ClientSource over a fixed list of clients.
+type staticClientSource []Client
 
-type staticClientSource []staticClient
-
-func (c staticClientSource) IsValidClientID(ctx context.Context, clientID string) (ok bool, err error) {
-	return slices.ContainsFunc(c, func(sc staticClient) bool {
-		return sc.ID == clientID
-	}), nil
-}
-
-func (c staticClientSource) ValidateClientSecret(ctx context.Context, clientID, clientSecret string) (ok bool, err error) {
-	return slices.ContainsFunc(c, func(sc staticClient) bool {
-		return sc.ID == clientID && slices.Contains(sc.Secrets, clientSecret)
-	}), nil
-}
-
-func (c staticClientSource) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
+func (c staticClientSource) Client(ctx context.Context, clientID string) (*Client, error) {
 	for _, sc := range c {
 		if sc.ID == clientID {
-			return sc.Secrets, nil
+			return &sc, nil
 		}
 	}
-	return nil, fmt.Errorf("client not found")
-}
-
-func (c staticClientSource) RedirectURIs(ctx context.Context, clientID string) ([]string, error) {
-	for _, sc := range c {
-		if sc.ID == clientID {
-			return sc.RedirectURLs, nil
-		}
-	}
-	return nil, fmt.Errorf("client not found")
-}
-
-func (c staticClientSource) ClientOpts(ctx context.Context, clientID string) ([]ClientOpt, error) {
-	for _, sc := range c {
-		if sc.ID == clientID {
-			opts := slices.Clone(sc.Opts)
-			if sc.Public {
-				opts = append(opts, ClientOptPublic())
-			}
-			return opts, nil
-		}
-	}
-	return nil, fmt.Errorf("client not found")
+	return nil, nil
 }

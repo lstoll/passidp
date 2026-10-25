@@ -148,53 +148,29 @@ func (c *StaticClients) GetClient(clientID string) (oidcsvr.Client, bool) {
 	return nil, false
 }
 
-func (c *StaticClients) IsValidClientID(_ context.Context, clientID string) (ok bool, err error) {
-	return slices.ContainsFunc(c.Clients, func(c config.Client) bool {
-		return c.ID == clientID
-	}), nil
-}
-
-func (c *StaticClients) ClientOpts(_ context.Context, clientID string) ([]oauth2as.ClientOpt, error) {
+// Client implements oauth2as.ClientSource.
+func (c *StaticClients) Client(_ context.Context, clientID string) (*oauth2as.Client, error) {
 	for _, cl := range c.Clients {
-		if cl.ID == clientID {
-			opts := []oauth2as.ClientOpt{}
-			if cl.Public {
-				opts = append(opts, oauth2as.ClientOptPublic())
-			}
-			if cl.SkipPKCE {
-				opts = append(opts, oauth2as.ClientOptSkipPKCE())
-			}
-			if keys := c.verificationKeys[cl.ID]; keys != nil {
-				opts = append(opts, oauth2as.ClientOptPrivateKeyJWT(keys))
-			}
-			signingAlgorithm := jwt.ES256
-			if cl.UseRS256 {
-				signingAlgorithm = jwt.RS256
-			}
-			opts = append(opts, oauth2as.ClientOptIDTokenSigningAlgorithm(signingAlgorithm))
-			return opts, nil
+		if cl.ID != clientID {
+			continue
 		}
+		client := &oauth2as.Client{
+			ID:                      cl.ID,
+			RedirectURIs:            cl.RedirectURLs,
+			Public:                  cl.Public,
+			SkipPKCE:                cl.SkipPKCE,
+			IDTokenSigningAlgorithm: jwt.ES256,
+		}
+		if cl.UseRS256 {
+			client.IDTokenSigningAlgorithm = jwt.RS256
+		}
+		if keys := c.verificationKeys[cl.ID]; keys != nil {
+			// private_key_jwt clients never authenticate with secrets.
+			client.PrivateKeyJWT = keys
+		} else {
+			client.Secrets = cl.Secrets
+		}
+		return client, nil
 	}
 	return nil, nil
-}
-
-func (c *StaticClients) ClientSecrets(_ context.Context, clientID string) ([]string, error) {
-	for _, cl := range c.Clients {
-		if cl.ID == clientID {
-			if c.verificationKeys[cl.ID] != nil {
-				return nil, nil
-			}
-			return cl.Secrets, nil
-		}
-	}
-	return nil, fmt.Errorf("client %s not found", clientID)
-}
-
-func (c *StaticClients) RedirectURIs(_ context.Context, clientID string) ([]string, error) {
-	for _, cl := range c.Clients {
-		if cl.ID == clientID {
-			return cl.RedirectURLs, nil
-		}
-	}
-	return nil, fmt.Errorf("client %s not found", clientID)
 }

@@ -46,7 +46,7 @@ func (s *Server) ParseAuthRequest(req *http.Request) (*AuthRequest, error) {
 		return nil, err
 	}
 
-	cidok, err := s.config.Clients.IsValidClientID(req.Context(), authreq.ClientID)
+	client, err := s.config.Clients.Client(req.Context(), authreq.ClientID)
 	if err != nil {
 		return nil, &oauth2proto.HTTPError{
 			Code:     http.StatusInternalServerError,
@@ -54,7 +54,7 @@ func (s *Server) ParseAuthRequest(req *http.Request) (*AuthRequest, error) {
 			CauseMsg: fmt.Sprintf("error checking client ID %s", authreq.ClientID),
 		}
 	}
-	if !cidok {
+	if client == nil {
 		return nil, &oauth2proto.HTTPError{
 			Code:     http.StatusBadRequest,
 			Message:  "unknown client",
@@ -62,16 +62,7 @@ func (s *Server) ParseAuthRequest(req *http.Request) (*AuthRequest, error) {
 		}
 	}
 
-	redirs, err := s.config.Clients.RedirectURIs(req.Context(), authreq.ClientID)
-	if err != nil {
-		return nil, &oauth2proto.HTTPError{
-			Code:     http.StatusInternalServerError,
-			Cause:    err,
-			CauseMsg: fmt.Sprintf("error getting redirect URIs for client ID %s", authreq.ClientID),
-		}
-	}
-
-	validatedRedirectURI, err := validateAndResolveRedirectURI(authreq.RedirectURI, redirs, authreq.ClientID)
+	validatedRedirectURI, err := validateAndResolveRedirectURI(authreq.RedirectURI, client.RedirectURIs, authreq.ClientID)
 	if err != nil {
 		return nil, &oauth2proto.HTTPError{
 			Code:     http.StatusBadRequest,
@@ -195,12 +186,15 @@ func (s *Server) GrantAuth(ctx context.Context, grant *AuthGrant) (redirectURI s
 	}
 
 	// Validate and resolve the redirect URI
-	redirs, err := s.config.Clients.RedirectURIs(ctx, grant.Request.ClientID)
+	client, err := s.config.Clients.Client(ctx, grant.Request.ClientID)
 	if err != nil {
-		return "", fmt.Errorf("error getting redirect URIs for client ID %s: %w", grant.Request.ClientID, err)
+		return "", fmt.Errorf("error getting client %s: %w", grant.Request.ClientID, err)
+	}
+	if client == nil {
+		return "", fmt.Errorf("client %s not found", grant.Request.ClientID)
 	}
 
-	redirURI, err := validateAndResolveRedirectURI(grant.Request.RedirectURI, redirs, grant.Request.ClientID)
+	redirURI, err := validateAndResolveRedirectURI(grant.Request.RedirectURI, client.RedirectURIs, grant.Request.ClientID)
 	if err != nil {
 		return "", err
 	}

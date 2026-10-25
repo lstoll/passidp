@@ -25,15 +25,13 @@ import (
 
 type clientSource struct{}
 
-func (clientSource) IsValidClientID(context.Context, string) (bool, error) { return true, nil }
-func (clientSource) ClientSecrets(context.Context, string) ([]string, error) {
-	return []string{"client-secret"}, nil
-}
-func (clientSource) RedirectURIs(context.Context, string) ([]string, error) {
-	return []string{"https://client.example/callback"}, nil
-}
-func (clientSource) ClientOpts(context.Context, string) ([]ClientOpt, error) {
-	return []ClientOpt{ClientOptSkipPKCE()}, nil
+func (clientSource) Client(_ context.Context, clientID string) (*Client, error) {
+	return &Client{
+		ID:           clientID,
+		Secrets:      []string{"client-secret"},
+		RedirectURIs: []string{"https://client.example/callback"},
+		SkipPKCE:     true,
+	}, nil
 }
 
 // newSQLiteDB returns a fresh SQLite database in a per-test temp directory.

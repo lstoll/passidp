@@ -59,8 +59,8 @@ func TestDPoPTokenFlow(t *testing.T) {
 				{
 					ID:           clientID,
 					Secrets:      []string{clientSecret},
-					RedirectURLs: []string{redirectURI},
-					Opts:         []ClientOpt{ClientOptSkipPKCE()},
+					RedirectURIs: []string{redirectURI},
+					SkipPKCE:     true,
 				},
 			},
 		},

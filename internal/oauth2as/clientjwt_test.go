@@ -52,14 +52,14 @@ func TestJWTClientTokenAuth(t *testing.T) {
 			Clients: staticClientSource{
 				{
 					ID:           clientID,
-					RedirectURLs: []string{"https://redirect"},
-					Opts:         []ClientOpt{ClientOptSkipPKCE(), ClientOptPrivateKeyJWT(keys)},
+					RedirectURIs: []string{"https://redirect"},
+					SkipPKCE:     true, PrivateKeyJWT: keys,
 				},
 				{
 					ID:           "client-id",
 					Secrets:      []string{"client-secret"},
-					RedirectURLs: []string{"https://redirect"},
-					Opts:         []ClientOpt{ClientOptSkipPKCE()},
+					RedirectURIs: []string{"https://redirect"},
+					SkipPKCE:     true,
 				},
 			},
 		},
@@ -146,10 +146,10 @@ func TestJWTClientTokenAuth(t *testing.T) {
 			ClientAssertionType: clientjwt.AssertionType,
 			ClientAssertion:     assertion,
 		}
-		if err := server.validateTokenClient(t.Context(), req, clientID); err != nil {
+		if _, err := server.validateTokenClient(t.Context(), req, clientID); err != nil {
 			t.Fatal(err)
 		}
-		err = server.validateTokenClient(t.Context(), req, clientID)
+		_, err = server.validateTokenClient(t.Context(), req, clientID)
 		tokenErr, ok := err.(*oauth2proto.TokenError)
 		if !ok || tokenErr.ErrorCode != oauth2proto.TokenErrorCodeInvalidClient {
 			t.Fatalf("error: got %v", err)
@@ -167,7 +167,7 @@ func TestJWTClientTokenAuth(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = server.validateTokenClient(t.Context(), &oauth2proto.TokenRequest{
+		_, err = server.validateTokenClient(t.Context(), &oauth2proto.TokenRequest{
 			ClientID:            clientID,
 			ClientAssertionType: clientjwt.AssertionType,
 			ClientAssertion:     assertion,

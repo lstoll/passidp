@@ -20,7 +20,7 @@ import (
 	"lds.li/passidp/internal/config"
 )
 
-func TestStaticClients_ClientOptsPublic(t *testing.T) {
+func TestStaticClients_Client(t *testing.T) {
 	sc := &StaticClients{
 		Clients: []config.Client{
 			{
@@ -36,20 +36,28 @@ func TestStaticClients_ClientOptsPublic(t *testing.T) {
 		},
 	}
 
-	publicOpts, err := sc.ClientOpts(context.Background(), "public-client")
-	if err != nil {
-		t.Fatalf("ClientOpts: %v", err)
+	pub, err := sc.Client(context.Background(), "public-client")
+	if err != nil || pub == nil {
+		t.Fatalf("Client: %v, %v", pub, err)
 	}
-	if len(publicOpts) != 2 {
-		t.Fatalf("expected public + signing alg options, got %d", len(publicOpts))
+	if !pub.Public || pub.SkipPKCE || len(pub.Secrets) != 0 || pub.IDTokenSigningAlgorithm != jwt.ES256 {
+		t.Fatalf("unexpected public client: %+v", pub)
+	}
+	if len(pub.RedirectURIs) != 1 || pub.RedirectURIs[0] != "http://127.0.0.1/callback" {
+		t.Fatalf("unexpected redirect URIs: %v", pub.RedirectURIs)
 	}
 
-	confOpts, err := sc.ClientOpts(context.Background(), "confidential-client")
-	if err != nil {
-		t.Fatalf("ClientOpts: %v", err)
+	conf, err := sc.Client(context.Background(), "confidential-client")
+	if err != nil || conf == nil {
+		t.Fatalf("Client: %v, %v", conf, err)
 	}
-	if len(confOpts) != 1 {
-		t.Fatalf("expected signing alg option only, got %d", len(confOpts))
+	if conf.Public || len(conf.Secrets) != 1 || conf.Secrets[0] != "secret" || conf.PrivateKeyJWT != nil {
+		t.Fatalf("unexpected confidential client: %+v", conf)
+	}
+
+	missing, err := sc.Client(context.Background(), "missing")
+	if err != nil || missing != nil {
+		t.Fatalf("Client(missing) = %v, %v; want nil, nil", missing, err)
 	}
 }
 
@@ -78,9 +86,9 @@ func TestNewStaticClientsPrivateKeyJWT(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewStaticClients: %v", err)
 			}
-			opts, err := sc.ClientOpts(context.Background(), "jwt-client")
-			if err != nil || len(opts) != 2 {
-				t.Fatalf("ClientOpts() = %d options, %v; want signing algorithm and private_key_jwt", len(opts), err)
+			client, err := sc.Client(context.Background(), "jwt-client")
+			if err != nil || client == nil || client.PrivateKeyJWT == nil || client.IDTokenSigningAlgorithm != jwt.ES256 {
+				t.Fatalf("Client() = %+v, %v; want private_key_jwt client", client, err)
 			}
 			wantKey, err := jwt.NewVerificationKey(&key.PublicKey, "", tc.kid)
 			if err != nil {
@@ -90,9 +98,8 @@ func TestNewStaticClientsPrivateKeyJWT(t *testing.T) {
 			if err != nil || !strings.Contains(string(jwks), `"kid":"`+wantKey.KeyID+`"`) {
 				t.Fatalf("verification JWKS = %s, %v; expected kid %q", jwks, err, wantKey.KeyID)
 			}
-			secrets, err := sc.ClientSecrets(context.Background(), "jwt-client")
-			if err != nil || len(secrets) != 0 {
-				t.Fatalf("ClientSecrets() = %v, %v; want no secrets", secrets, err)
+			if len(client.Secrets) != 0 || client.Public {
+				t.Fatalf("Client() = %+v; want no secrets and not public", client)
 			}
 		})
 	}
@@ -278,7 +285,8 @@ func TestConfigValidatePublicSkipPKCE(t *testing.T) {
 
 func TestStaticClientsAcceptRS256(t *testing.T) {
 	sc := &StaticClients{Clients: []config.Client{{ID: "rsa-client", UseRS256: true}}}
-	if _, err := sc.ClientOpts(context.Background(), "rsa-client"); err != nil {
-		t.Fatalf("ClientOpts: %v", err)
+	c, err := sc.Client(context.Background(), "rsa-client")
+	if err != nil || c == nil || c.IDTokenSigningAlgorithm != jwt.RS256 {
+		t.Fatalf("Client() = %+v, %v; want RS256 client", c, err)
 	}
 }

@@ -1,6 +1,13 @@
 package oauth2as
 
-import "testing"
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"testing"
+
+	"lds.li/oauth2ext/jwt"
+)
 
 func TestIsValidRedirectURI(t *testing.T) {
 	registeredURIs := []string{
@@ -145,6 +152,39 @@ func TestIsValidRedirectURI(t *testing.T) {
 			if actual != tc.expected {
 				t.Errorf("Test: '%s'\nDescription: %s\nRedirect URI: '%s'\nExpected: %t, but got: %t",
 					tc.name, tc.description, tc.redirectURI, tc.expected, actual)
+			}
+		})
+	}
+}
+
+func TestClientValidate(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := jwt.NewVerificationKeySet(jwt.VerificationKey{Key: &key.PublicKey, Algorithm: jwt.ES256, KeyID: "key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		client  Client
+		wantErr bool
+	}{
+		{"public with skip PKCE", Client{Public: true, SkipPKCE: true}, true},
+		{"public alone", Client{Public: true}, false},
+		{"public with private key jwt", Client{Public: true, PrivateKeyJWT: keys}, true},
+		{"public with secrets", Client{Public: true, Secrets: []string{"s"}}, true},
+		{"private key jwt with secrets", Client{PrivateKeyJWT: keys, Secrets: []string{"s"}}, true},
+		{"private key jwt alone", Client{PrivateKeyJWT: keys, SkipPKCE: true}, false},
+		{"secrets alone", Client{Secrets: []string{"s"}}, false},
+		{"no authentication configured", Client{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.client.validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validate() = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
 	}

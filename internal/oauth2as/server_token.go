@@ -189,27 +189,19 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "redirect URI mismatch"}
 	}
 
-	if err := s.validateTokenClient(ctx, treq, loadedGrant.grant.ClientID); err != nil {
+	client, err := s.validateTokenClient(ctx, treq, loadedGrant.grant.ClientID)
+	if err != nil {
 		return nil, err
 	}
 
-	optsForClient, err := s.config.Clients.ClientOpts(ctx, loadedGrant.grant.ClientID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch client opts: %w", err)
-	}
-	copts, err := applyClientOpts(optsForClient)
-	if err != nil {
-		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeUnauthorizedClient, Description: "invalid client configuration", Cause: err}
-	}
-
 	// Reject if PKCE is required but no code verifier was provided
-	if !copts.skipPKCE && treq.CodeVerifier == "" {
+	if !client.SkipPKCE && treq.CodeVerifier == "" {
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeUnauthorizedClient, Description: "PKCE required, but code verifier not passed"}
 	}
 
 	idTokenAlgorithm := s.defaultIDTokenSigningAlgorithm()
-	if copts.idTokenSigningAlgorithm != "" {
-		idTokenAlgorithm = copts.idTokenSigningAlgorithm
+	if client.IDTokenSigningAlgorithm != "" {
+		idTokenAlgorithm = client.IDTokenSigningAlgorithm
 	}
 
 	// Verify the code verifier against the session data
@@ -325,7 +317,8 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
 	}
 
-	if err := s.validateTokenClient(ctx, treq, loadedGrant.grant.ClientID); err != nil {
+	client, err := s.validateTokenClient(ctx, treq, loadedGrant.grant.ClientID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -352,18 +345,9 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		}
 	}
 
-	optsForClient, err := s.config.Clients.ClientOpts(ctx, loadedGrant.grant.ClientID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch client opts: %w", err)
-	}
-	copts, err := applyClientOpts(optsForClient)
-	if err != nil {
-		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeUnauthorizedClient, Description: "invalid client configuration", Cause: err}
-	}
-
 	idTokenAlgorithm := s.defaultIDTokenSigningAlgorithm()
-	if copts.idTokenSigningAlgorithm != "" {
-		idTokenAlgorithm = copts.idTokenSigningAlgorithm
+	if client.IDTokenSigningAlgorithm != "" {
+		idTokenAlgorithm = client.IDTokenSigningAlgorithm
 	}
 
 	// Check if this grant is DPoP-bound by looking for thumbprint in metadata

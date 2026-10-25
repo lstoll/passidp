@@ -38,8 +38,8 @@ func TestTokenCommitFailuresAreAtomic(t *testing.T) {
 			Clients: staticClientSource{{
 				ID:           "client-id",
 				Secrets:      []string{"test-secret"},
-				RedirectURLs: []string{"https://redirect"},
-				Opts:         []ClientOpt{ClientOptSkipPKCE()},
+				RedirectURIs: []string{"https://redirect"},
+				SkipPKCE:     true,
 			}},
 			TokenHandler: func(context.Context, *TokenRequest) (*TokenResponse, error) {
 				return &TokenResponse{}, nil

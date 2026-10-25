@@ -40,7 +40,7 @@ func TestRefreshTokenConcurrency(t *testing.T) {
 				{
 					ID:           "test-client",
 					Secrets:      []string{"test-secret"},
-					RedirectURLs: []string{"https://redirect"},
+					RedirectURIs: []string{"https://redirect"},
 				},
 			},
 		},

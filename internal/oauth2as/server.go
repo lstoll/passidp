@@ -243,47 +243,52 @@ func (s *Server) tokenURL() string {
 	return strings.TrimRight(s.config.Issuer, "/") + "/token"
 }
 
-func (s *Server) validateTokenClient(ctx context.Context, req *oauth2proto.TokenRequest, wantClientID string) error {
+func (s *Server) validateTokenClient(ctx context.Context, req *oauth2proto.TokenRequest, wantClientID string) (*Client, error) {
 	// check to see if we're working with the same client
 	assertionAttempt := req.ClientAssertion != "" || req.ClientAssertionType != ""
 	if (!assertionAttempt && wantClientID != req.ClientID) || (assertionAttempt && req.ClientID != "" && wantClientID != req.ClientID) {
-		return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "", Cause: fmt.Errorf("code redeemed for wrong client")}
+		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "", Cause: fmt.Errorf("code redeemed for wrong client")}
 	}
 	clientID := req.ClientID
 	if clientID == "" {
 		clientID = wantClientID
 	}
 
-	opts, err := s.config.Clients.ClientOpts(ctx, clientID)
+	client, err := s.config.Clients.Client(ctx, clientID)
 	if err != nil {
-		return &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "failed to get client options", Cause: err}
+		return nil, &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "failed to get client", Cause: err}
 	}
-	co, err := applyClientOpts(opts)
-	if err != nil {
-		return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "invalid client configuration", Cause: err}
+	if client == nil {
+		// A grant exists for a client that is no longer registered. This is
+		// reported as an internal error, as it was when the client lookup
+		// failed.
+		return nil, &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "failed to get client", Cause: fmt.Errorf("client %s not found", clientID)}
 	}
-	if co.privateKeyJWT != nil {
+	if err := client.validate(); err != nil {
+		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "invalid client configuration", Cause: err}
+	}
+	if client.PrivateKeyJWT != nil {
 		if !assertionAttempt {
-			return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication"}
+			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication"}
 		}
-		return s.validateJWTClient(ctx, req, clientID, co.privateKeyJWT)
+		if err := s.validateJWTClient(ctx, req, clientID, client.PrivateKeyJWT); err != nil {
+			return nil, err
+		}
+		return client, nil
 	}
 	if assertionAttempt {
-		return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication"}
+		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication"}
 	}
-	if co.public {
+	if client.Public {
 		if req.ClientSecret != "" {
-			return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication"}
+			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication"}
 		}
-		return nil
+		return client, nil
 	}
 
-	secrets, err := s.config.Clients.ClientSecrets(ctx, clientID)
-	if err != nil {
-		return &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "failed to get client secrets", Cause: err}
-	}
+	secrets := client.Secrets
 	if len(secrets) == 0 {
-		return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client secret"}
+		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client secret"}
 	}
 
 	var matchFound int32
@@ -291,13 +296,13 @@ func (s *Server) validateTokenClient(ctx context.Context, req *oauth2proto.Token
 		matchFound |= int32(subtle.ConstantTimeCompare([]byte(secret), []byte(req.ClientSecret)))
 	}
 	if matchFound != 1 {
-		return &oauth2proto.TokenError{
+		return nil, &oauth2proto.TokenError{
 			ErrorCode:   oauth2proto.TokenErrorCodeInvalidClient,
 			Description: "Invalid client secret",
 		}
 	}
 
-	return nil
+	return client, nil
 }
 
 func (s *Server) validateJWTClient(ctx context.Context, req *oauth2proto.TokenRequest, clientID string, keys *jwt.VerificationKeySet) error {

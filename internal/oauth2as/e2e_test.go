@@ -3,12 +3,10 @@ package oauth2as_test
 import (
 	"context"
 	"crypto/rand"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -77,13 +75,13 @@ func TestE2E(t *testing.T) {
 			clientSource := staticClientSource{
 				{
 					ID:           clientID,
-					Secrets:      []string{clientSecret},
-					RedirectURLs: []string{cliSvr.URL},
+					RedirectURIs: []string{cliSvr.URL},
 					Public:       tc.WithPKCE,
 				},
 			}
 			if !tc.WithPKCE {
-				clientSource[0].Opts = []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()}
+				clientSource[0].Secrets = []string{clientSecret}
+				clientSource[0].SkipPKCE = true
 			}
 
 			s := newTestStorage(t)
@@ -294,55 +292,14 @@ func getTestSigner(t *testing.T) (jwt.Signer, *jwt.VerificationKeySet) {
 	return testSigner, testVerificationKeys
 }
 
-type staticClient struct {
-	ID           string
-	Secrets      []string
-	RedirectURLs []string
-	Public       bool
-	Opts         []oauth2as.ClientOpt
-}
+// staticClientSource is a test ClientSource over a fixed list of clients.
+type staticClientSource []oauth2as.Client
 
-type staticClientSource []staticClient
-
-func (c staticClientSource) IsValidClientID(ctx context.Context, clientID string) (ok bool, err error) {
-	return slices.ContainsFunc(c, func(sc staticClient) bool {
-		return sc.ID == clientID
-	}), nil
-}
-
-func (c staticClientSource) ValidateClientSecret(ctx context.Context, clientID, clientSecret string) (ok bool, err error) {
-	return slices.ContainsFunc(c, func(sc staticClient) bool {
-		return sc.ID == clientID && slices.Contains(sc.Secrets, clientSecret)
-	}), nil
-}
-
-func (c staticClientSource) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
+func (c staticClientSource) Client(ctx context.Context, clientID string) (*oauth2as.Client, error) {
 	for _, sc := range c {
 		if sc.ID == clientID {
-			return sc.Secrets, nil
+			return &sc, nil
 		}
 	}
-	return nil, fmt.Errorf("client not found")
-}
-
-func (c staticClientSource) RedirectURIs(ctx context.Context, clientID string) ([]string, error) {
-	for _, sc := range c {
-		if sc.ID == clientID {
-			return sc.RedirectURLs, nil
-		}
-	}
-	return nil, fmt.Errorf("client not found")
-}
-
-func (c staticClientSource) ClientOpts(ctx context.Context, clientID string) ([]oauth2as.ClientOpt, error) {
-	for _, sc := range c {
-		if sc.ID == clientID {
-			opts := slices.Clone(sc.Opts)
-			if sc.Public {
-				opts = append(opts, oauth2as.ClientOptPublic())
-			}
-			return opts, nil
-		}
-	}
-	return nil, fmt.Errorf("client not found")
+	return nil, nil
 }

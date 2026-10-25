@@ -8,84 +8,57 @@ import (
 	"lds.li/oauth2ext/jwt"
 )
 
-type clientOpts struct {
-	skipPKCE                bool
-	idTokenSigningAlgorithm jwt.Algorithm
-	public                  bool
-	privateKeyJWT           *jwt.VerificationKeySet
-	privateKeyJWTConfigured bool
+// Client describes a registered OAuth client.
+type Client struct {
+	// ID is the client identifier.
+	ID string
+	// RedirectURIs is the list of valid redirect URIs. They are compared for an
+	// exact match, with the exception of loopback addresses, which can have a
+	// variable port (https://www.rfc-editor.org/rfc/rfc8252#section-7.3).
+	RedirectURIs []string
+
+	// Authentication. Exactly one method applies: PrivateKeyJWT if set,
+	// otherwise Public (PKCE only, no secret), otherwise Secrets. Combining
+	// Secrets with PrivateKeyJWT or Public is invalid.
+
+	// Secrets is the list of valid client secrets, for confidential clients
+	// using client_secret authentication.
+	Secrets []string
+	// Public marks the client as public. Public clients authenticate the
+	// authorization-code exchange with PKCE instead of a client secret.
+	Public bool
+	// PrivateKeyJWT configures private_key_jwt authentication. The key set is
+	// a stable handle and may be updated with Replace.
+	PrivateKeyJWT *jwt.VerificationKeySet
+
+	// SkipPKCE disables the PKCE requirement. Not allowed with Public.
+	SkipPKCE bool
+	// IDTokenSigningAlgorithm overrides the server default when set.
+	IDTokenSigningAlgorithm jwt.Algorithm
 }
 
-// ClientOpt is a flag that can be set on a given client, to adjust various
-// behaviours.
-type ClientOpt func(opts *clientOpts)
-
-// ClientOptSkipPKCE indicates that the client is not required to use PKCE. It
-// must not be combined with [ClientOptPublic].
-func ClientOptSkipPKCE() ClientOpt {
-	return func(opts *clientOpts) {
-		opts.skipPKCE = true
+// validate checks that the client's configuration is internally consistent.
+func (c *Client) validate() error {
+	if c.Public && c.SkipPKCE {
+		return fmt.Errorf("public clients cannot skip PKCE")
 	}
+	if c.Public && c.PrivateKeyJWT != nil {
+		return fmt.Errorf("public clients cannot use private_key_jwt")
+	}
+	if c.Public && len(c.Secrets) > 0 {
+		return fmt.Errorf("public clients cannot have client secrets")
+	}
+	if c.PrivateKeyJWT != nil && len(c.Secrets) > 0 {
+		return fmt.Errorf("private_key_jwt clients cannot have client secrets")
+	}
+	return nil
 }
 
-// ClientOptIDTokenSigningAlgorithm selects the ID-token signing algorithm for
-// a client that cannot use the server default.
-func ClientOptIDTokenSigningAlgorithm(algorithm jwt.Algorithm) ClientOpt {
-	return func(opts *clientOpts) {
-		opts.idTokenSigningAlgorithm = algorithm
-	}
-}
-
-// ClientOptPublic marks a client as public. Public clients authenticate the
-// authorization-code exchange with PKCE instead of a client secret. It must
-// not be combined with [ClientOptSkipPKCE].
-func ClientOptPublic() ClientOpt {
-	return func(opts *clientOpts) {
-		opts.public = true
-	}
-}
-
-// ClientOptPrivateKeyJWT configures private_key_jwt authentication for a
-// client. The key set is a stable handle and may be updated with Replace.
-// It cannot be combined with ClientOptPublic or client-secret authentication.
-func ClientOptPrivateKeyJWT(keys *jwt.VerificationKeySet) ClientOpt {
-	return func(opts *clientOpts) {
-		opts.privateKeyJWT = keys
-		opts.privateKeyJWTConfigured = true
-	}
-}
-
-func applyClientOpts(opts []ClientOpt) (clientOpts, error) {
-	var result clientOpts
-	for _, opt := range opts {
-		opt(&result)
-	}
-	if result.public && result.skipPKCE {
-		return clientOpts{}, fmt.Errorf("public clients cannot skip PKCE")
-	}
-	if result.public && result.privateKeyJWT != nil {
-		return clientOpts{}, fmt.Errorf("public clients cannot use private_key_jwt")
-	}
-	if result.privateKeyJWTConfigured && result.privateKeyJWT == nil {
-		return clientOpts{}, fmt.Errorf("private_key_jwt requires verification keys")
-	}
-	return result, nil
-}
-
-// ClientSource is used for validating client information for the general flow
+// ClientSource looks up clients.
 type ClientSource interface {
-	// IsValidClientID should return true if the passed client ID is valid
-	IsValidClientID(_ context.Context, clientID string) (ok bool, err error)
-	// ClientSecrets should return the list of valid client secrets for the
-	// given client.
-	ClientSecrets(_ context.Context, clientID string) ([]string, error)
-	// ValidateRedirectURI should return the list of valid redirect URIs. They
-	// will be compared for an exact match, with the exception of loopback
-	// addresses, which can have a variable port
-	// (https://www.rfc-editor.org/rfc/rfc8252#section-7.3).
-	RedirectURIs(_ context.Context, clientID string) ([]string, error)
-	// ClientOpts returns the list of options for this client. See ClientOpt.
-	ClientOpts(_ context.Context, clientID string) ([]ClientOpt, error)
+	// Client returns the client with the given ID, or (nil, nil) if there is
+	// none.
+	Client(ctx context.Context, clientID string) (*Client, error)
 }
 
 // isValidRedirectURI compares a redirect URI from a request against a list of

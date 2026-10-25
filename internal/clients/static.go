@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"lds.li/oauth2ext/jwt"
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oauth2as"
 	"lds.li/passidp/internal/oidcsvr"
 )
 

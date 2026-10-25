@@ -13,9 +13,9 @@ import (
 	"uuid"
 
 	"filippo.io/passkey"
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/passidp/internal/appsession"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oauth2as"
 	"lds.li/passidp/internal/ratelimit"
 	"lds.li/passidp/internal/storage"
 	"lds.li/passidp/internal/webcommon"

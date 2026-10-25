@@ -9,8 +9,8 @@ import (
 	"time"
 	"uuid"
 
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oauth2as"
 	"lds.li/passidp/internal/policy"
 )
 

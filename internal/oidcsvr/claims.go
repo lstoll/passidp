@@ -3,8 +3,8 @@ package oidcsvr
 import (
 	"slices"
 
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oauth2as"
 )
 
 func defaultIDTokenClaims(user *config.User) map[string]any {

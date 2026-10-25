@@ -1,0 +1,3 @@
+.gobincache
+/bin/golangci-lint*
+/go.work*

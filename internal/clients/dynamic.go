@@ -12,9 +12,9 @@ import (
 	"uuid"
 
 	"lds.li/oauth2ext/jwt"
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
 	"lds.li/passidp/internal/auth"
+	"lds.li/passidp/internal/oauth2as"
 	"lds.li/passidp/internal/storage"
 	"lds.li/web"
 )

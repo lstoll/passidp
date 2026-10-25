@@ -3,8 +3,8 @@ package clients
 import (
 	"context"
 
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
+	"lds.li/passidp/internal/oauth2as"
 	"lds.li/passidp/internal/oidcsvr"
 	"lds.li/web"
 )

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	"lds.li/oauth2ext/oauth2as/oauth2proto"
+	"lds.li/passidp/internal/oauth2as/oauth2proto"
 	"lds.li/web"
 )
 

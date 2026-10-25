@@ -278,7 +278,7 @@ func TestParseAuthRequestWriteError(t *testing.T) {
 
 func TestGrantAuth(t *testing.T) {
 	// Create a test server with storage and clients
-	storage := NewMemoryStorage()
+	storage := newTestStorage(t)
 	server := &Server{
 		config: Config{
 			Storage: storage,
@@ -556,7 +556,7 @@ func TestGrantAuth(t *testing.T) {
 }
 
 func TestGrantAuthStoresAuthenticatedAt(t *testing.T) {
-	storage := NewMemoryStorage()
+	storage := newTestStorage(t)
 	server := &Server{
 		config: Config{
 			Storage: storage,
@@ -625,7 +625,7 @@ func TestGrantAuthRejectsFutureAuthenticationTime(t *testing.T) {
 
 func TestAuthRequestIntegration(t *testing.T) {
 	// Test the full flow from parsing to granting
-	storage := NewMemoryStorage()
+	storage := newTestStorage(t)
 	server := &Server{
 		config: Config{
 			Storage: storage,

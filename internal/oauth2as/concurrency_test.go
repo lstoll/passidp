@@ -16,7 +16,7 @@ import (
 )
 
 func TestRefreshTokenConcurrency(t *testing.T) {
-	s := NewMemoryStorage()
+	s := newTestStorage(t)
 	signer, verifier := testSignerVerifier(t)
 	const concurrency = 10
 	ready := make(chan struct{})
@@ -127,7 +127,7 @@ func TestRefreshTokenConcurrency(t *testing.T) {
 	if err != nil || postGrant == nil {
 		t.Errorf("grant was unexpectedly revoked: %v", err)
 	}
-	if count := memoryRefreshTokenCount(t, s); count != 1 {
+	if count := refreshTokenCount(t, s); count != 1 {
 		t.Fatalf("refresh token records = %d, want one active replacement", count)
 	}
 }

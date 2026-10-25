@@ -20,7 +20,7 @@ func TestRefreshTokenRotationAndGrace(t *testing.T) {
 		clientSecret = "client-secret"
 	)
 
-	s := oauth2as.NewMemoryStorage()
+	s := newTestStorage(t)
 	signer, jwtVerifier := getTestSigner(t)
 
 	opcfg := oauth2as.Config{
@@ -151,7 +151,7 @@ func TestConcurrentRefreshAttempts(t *testing.T) {
 		clientSecret = "client-secret"
 	)
 
-	s := oauth2as.NewMemoryStorage()
+	s := newTestStorage(t)
 	signer, jwtVerifier := getTestSigner(t)
 
 	opcfg := oauth2as.Config{
@@ -274,7 +274,7 @@ func TestReplacedByTokenIDTracking(t *testing.T) {
 		clientSecret = "client-secret"
 	)
 
-	s := oauth2as.NewMemoryStorage()
+	s := newTestStorage(t)
 	signer, jwtVerifier := getTestSigner(t)
 
 	opcfg := oauth2as.Config{
@@ -393,7 +393,7 @@ func TestEncryptedMetadataWithRotation(t *testing.T) {
 		clientSecret = "client-secret"
 	)
 
-	s := oauth2as.NewMemoryStorage()
+	s := newTestStorage(t)
 	signer, jwtVerifier := getTestSigner(t)
 
 	const testMetadata = "secret-upstream-refresh-token"

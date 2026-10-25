@@ -39,7 +39,7 @@ func TestDPoPTokenFlow(t *testing.T) {
 		t.Fatalf("failed to create signer: %v", err)
 	}
 
-	s := NewMemoryStorage()
+	s := newTestStorage(t)
 	signer, verifier := testSignerVerifier(t)
 
 	var capturedTokenRequest *TokenRequest
@@ -379,7 +379,7 @@ func TestInvalidAuthorizationCodeDoesNotConsumeDPoPProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	dpopVerifier := &dpop.Verifier{ReplayCacheMaxEntries: 1}
-	server := &Server{config: Config{Issuer: issuer, Storage: NewMemoryStorage(), DPoPVerifier: dpopVerifier}}
+	server := &Server{config: Config{Issuer: issuer, Storage: newTestStorage(t), DPoPVerifier: dpopVerifier}}
 	req := httptest.NewRequest(http.MethodPost, "/token", nil)
 	req.Header.Set("DPoP", proof)
 	if _, err := server.codeToken(t.Context(), req, &oauth2proto.TokenRequest{Code: "not-an-auth-code"}); err == nil {
@@ -424,7 +424,7 @@ func TestVerifyDPoPProofPreservesEscapedRequestPath(t *testing.T) {
 
 func TestUserinfoDPoPSenderConstraint(t *testing.T) {
 	const issuer = "https://issuer.example"
-	storage := NewMemoryStorage()
+	storage := newTestStorage(t)
 	grantID, err := storage.createGrant(t.Context(), &storedGrant{
 		UserID: "sub", ClientID: "client", GrantedScopes: []string{oidc.ScopeOpenID},
 		GrantedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),

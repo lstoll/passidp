@@ -42,7 +42,7 @@ func TestJWTClientTokenAuth(t *testing.T) {
 		config: Config{
 			Issuer:               issuer,
 			TokenURL:             tokenURL,
-			Storage:              NewMemoryStorage(),
+			Storage:              newTestStorage(t),
 			Signer:               signer,
 			VerificationKeys:     verifier,
 			RefreshTokenValidity: time.Hour,

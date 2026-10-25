@@ -14,7 +14,7 @@ import (
 
 func TestListRefreshSessions(t *testing.T) {
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
-	store := NewMemoryStorage()
+	store := newTestStorage(t)
 	server := &Server{config: Config{Storage: store}, now: func() time.Time { return now }}
 
 	putGrantAndSession := func(session storedRefreshSession) {
@@ -43,15 +43,6 @@ func TestListRefreshSessions(t *testing.T) {
 	putGrantAndSession(storedRefreshSession{GrantID: "g2", UserID: "user", ClientID: "client-b", GrantedScopes: []string{"openid", "offline_access"}, ExpiresAt: now.Add(2 * time.Hour), LastUsedAt: now.Add(200 * time.Nanosecond)})
 	putGrantAndSession(storedRefreshSession{GrantID: "expired", UserID: "user", ClientID: "client-c", ExpiresAt: now})
 	putGrantAndSession(storedRefreshSession{GrantID: "other", UserID: "other", ClientID: "client-a", ExpiresAt: now.Add(time.Hour)})
-	// A session without a live grant must not be listed, matching SQL JOIN semantics.
-	orphan := storedRefreshSession{GrantID: "orphan", UserID: "user", ClientID: "client-a", ExpiresAt: now.Add(time.Hour), LastUsedAt: now.Add(time.Hour)}
-	if err := store.commit(t.Context(), storageCommit{
-		Checks:   []storageCheck{{Kind: storageKindSession, ID: orphan.GrantID}},
-		Sessions: []storedRefreshSession{orphan},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	first, err := server.ListRefreshSessions(t.Context(), RefreshSessionQuery{UserID: "user", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +84,7 @@ func TestListRefreshSessions(t *testing.T) {
 }
 
 func TestCodeExchangeCreatesRefreshSession(t *testing.T) {
-	store := NewMemoryStorage()
+	store := newTestStorage(t)
 	signer, verifier := testSignerVerifier(t)
 	currentTime := time.Now()
 	server := &Server{

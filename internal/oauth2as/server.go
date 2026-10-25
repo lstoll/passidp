@@ -134,7 +134,7 @@ func NewServer(c Config) (*Server, error) {
 		return nil, fmt.Errorf("invalid issuer URL %s: %w", c.Issuer, err)
 	}
 
-	if c.Storage == nil || c.Storage.backend == nil {
+	if c.Storage == nil {
 		return nil, fmt.Errorf("storage is required")
 	}
 	if c.Clients == nil {

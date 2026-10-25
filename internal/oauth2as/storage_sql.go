@@ -32,9 +32,11 @@ const (
 type sqlStorage struct {
 	db         *sql.DB
 	migrations []sqlMigration
-}
 
-var _ storageBackend = (*sqlStorage)(nil)
+	// commitHook, if set, is called before each Commit and aborts it with the
+	// returned error. It is a test seam for fault injection.
+	commitHook func(storageCommit) error
+}
 
 // NewSQLStorage returns SQLite-backed storage using db. It does not connect to
 // the database or apply migrations. Call [Storage.Migrate] before serving
@@ -170,6 +172,11 @@ func (s *sqlStorage) scanRefreshToken(ctx context.Context, q sqlQueryer, id stri
 }
 
 func (s *sqlStorage) Commit(ctx context.Context, commit storageCommit) error {
+	if s.commitHook != nil {
+		if err := s.commitHook(commit); err != nil {
+			return err
+		}
+	}
 	var err error
 	for attempt := range 4 {
 		err = s.commitOnce(ctx, commit)

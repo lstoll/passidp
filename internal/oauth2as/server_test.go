@@ -51,7 +51,7 @@ func TestCodeToken(t *testing.T) {
 	)
 
 	newOIDC := func() *Server {
-		s := NewMemoryStorage()
+		s := newTestStorage(t)
 
 		signer, verifier := testSignerVerifier(t)
 
@@ -364,7 +364,7 @@ func TestRefreshToken(t *testing.T) {
 	)
 
 	newOIDC := func() *Server {
-		s := NewMemoryStorage()
+		s := newTestStorage(t)
 
 		signer, verifier := testSignerVerifier(t)
 
@@ -638,7 +638,7 @@ func TestUserinfo(t *testing.T) {
 		},
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
-			s := NewMemoryStorage()
+			s := newTestStorage(t)
 
 			signer, verifier := testSignerVerifier(t)
 
@@ -691,7 +691,7 @@ func TestUserinfo(t *testing.T) {
 func TestUserinfoGrantContext(t *testing.T) {
 	const issuer = "http://iss"
 
-	s := NewMemoryStorage()
+	s := newTestStorage(t)
 	grant := &storedGrant{
 		UserID:        "sub",
 		ClientID:      "client-id",
@@ -770,7 +770,7 @@ func TestUserinfoGrantContext(t *testing.T) {
 
 func TestUserinfoRequiresOpenIDScope(t *testing.T) {
 	const issuer = "http://iss"
-	storage := NewMemoryStorage()
+	storage := newTestStorage(t)
 	grantID, err := storage.createGrant(t.Context(), &storedGrant{
 		UserID:        "sub",
 		ClientID:      "client-id",
@@ -805,7 +805,7 @@ func TestUserinfoRequiresOpenIDScope(t *testing.T) {
 
 func TestUserinfoFailsClosedOnGrantContext(t *testing.T) {
 	const issuer = "http://iss"
-	storage := NewMemoryStorage()
+	storage := newTestStorage(t)
 	grantID, err := storage.createGrant(t.Context(), &storedGrant{
 		UserID: "sub", ClientID: "client-id", GrantedScopes: []string{oidc.ScopeOpenID},
 		GrantedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),

@@ -143,24 +143,12 @@ type storedRefreshSession struct {
 	AuthenticatedAt time.Time
 	ExpiresAt       time.Time
 	LastUsedAt      time.Time
-	storageVersion  uint64
-}
-
-type storageBackend interface {
-	GetGrant(ctx context.Context, id string) (storedGrant, error)
-	GetAuthCode(ctx context.Context, id string) (storedAuthCode, error)
-	GetRefreshToken(ctx context.Context, id string) (storedRefreshToken, error)
-	Commit(ctx context.Context, commit storageCommit) error
-	ListRefreshSessions(ctx context.Context, query storageRefreshSessionQuery) ([]storedRefreshSession, error)
-	Cleanup(ctx context.Context, options CleanupOptions) (CleanupResult, error)
-	Migrate(ctx context.Context) error
 }
 
 // Storage is an opaque authorization-server storage implementation. Construct
-// one with [NewSQLStorage] (SQLite) or [NewMemoryStorage]. A Storage must be dedicated to
-// one issuer.
+// one with [NewSQLStorage]. A Storage must be dedicated to one issuer.
 type Storage struct {
-	backend storageBackend
+	backend *sqlStorage
 }
 
 // CleanupOptions controls physical removal of expired storage records.
@@ -189,20 +177,14 @@ const (
 )
 
 // Migrate applies pending schema migrations. It is safe to call on every
-// process start. In-memory storage is a no-op.
+// process start.
 func (s *Storage) Migrate(ctx context.Context) error {
-	if s == nil || s.backend == nil {
-		return errors.New("oauth2as: invalid storage")
-	}
 	return s.backend.Migrate(ctx)
 }
 
 // Cleanup physically removes expired storage records. Protocol validity does
 // not depend on cleanup being run.
 func (s *Storage) Cleanup(ctx context.Context, options CleanupOptions) (CleanupResult, error) {
-	if s == nil || s.backend == nil {
-		return CleanupResult{}, errors.New("oauth2as: invalid storage")
-	}
 	if options.Before.IsZero() {
 		options.Before = time.Now()
 	}

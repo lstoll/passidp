@@ -86,7 +86,7 @@ func TestE2E(t *testing.T) {
 				clientSource[0].Opts = []oauth2as.ClientOpt{oauth2as.ClientOptSkipPKCE()}
 			}
 
-			s := oauth2as.NewMemoryStorage()
+			s := newTestStorage(t)
 
 			oidcSvrMux := http.NewServeMux()
 			oidcSvr := httptest.NewServer(oidcSvrMux)

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,39 +14,17 @@ import (
 	"lds.li/passidp/internal/oauth2as/oauth2proto"
 )
 
-func memoryRefreshTokenCount(t *testing.T, store *Storage) int {
-	t.Helper()
-	backend := store.backend
-	for {
-		switch b := backend.(type) {
-		case *memoryStorage:
-			return b.refreshTokenCount()
-		case *failingCommitBackend:
-			backend = b.storageBackend
-		default:
-			t.Fatalf("unsupported backend %T", backend)
-			return 0
-		}
-	}
-}
-
-type failingCommitBackend struct {
-	storageBackend
-	fail bool
-}
-
-func (s *failingCommitBackend) Commit(ctx context.Context, commit storageCommit) error {
-	if s.fail {
-		return errors.New("injected commit failure")
-	}
-	return s.storageBackend.Commit(ctx, commit)
-}
-
 func TestTokenCommitFailuresAreAtomic(t *testing.T) {
-	base := NewMemoryStorage()
-	authCode := newCodeGrant(t, base)
-	failing := &failingCommitBackend{storageBackend: base.backend, fail: true}
-	store := &Storage{backend: failing}
+	store := newTestStorage(t)
+	authCode := newCodeGrant(t, store)
+	var failCommits atomic.Bool
+	store.backend.commitHook = func(storageCommit) error {
+		if failCommits.Load() {
+			return errors.New("injected commit failure")
+		}
+		return nil
+	}
+	failCommits.Store(true)
 	signer, verifier := testSignerVerifier(t)
 	server := &Server{
 		config: Config{
@@ -84,13 +63,13 @@ func TestTokenCommitFailuresAreAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.getAuthCode(t.Context(), parsed.ID()); err != nil {
+	if _, err := store.getAuthCode(t.Context(), parsed.ID()); err != nil {
 		t.Fatalf("authorization code was consumed by failed commit: %v", err)
 	}
-	if count := memoryRefreshTokenCount(t, base); count != 0 {
+	if count := refreshTokenCount(t, store); count != 0 {
 		t.Fatalf("failed commit created %d refresh token records", count)
 	}
-	sessions, err := base.listRefreshSessions(t.Context(), storageRefreshSessionQuery{UserID: "testsub", ActiveAt: time.Now().Add(-time.Minute), Limit: 10})
+	sessions, err := store.listRefreshSessions(t.Context(), storageRefreshSessionQuery{UserID: "testsub", ActiveAt: time.Now().Add(-time.Minute), Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +77,7 @@ func TestTokenCommitFailuresAreAtomic(t *testing.T) {
 		t.Fatalf("failed commit created %d session index records", len(sessions))
 	}
 
-	failing.fail = false
+	failCommits.Store(false)
 	issued, err := server.codeToken(t.Context(), httptest.NewRequest(http.MethodPost, "/token", nil), &oauth2proto.TokenRequest{
 		GrantType:    oauth2proto.GrantTypeAuthorizationCode,
 		Code:         authCode,
@@ -115,11 +94,11 @@ func TestTokenCommitFailuresAreAtomic(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "test-secret",
 	}
-	failing.fail = true
+	failCommits.Store(true)
 	if _, err := server.refreshToken(t.Context(), httptest.NewRequest(http.MethodPost, "/token", nil), refreshRequest); err == nil {
 		t.Fatal("refresh unexpectedly succeeded with a failed commit")
 	}
-	failing.fail = false
+	failCommits.Store(false)
 	if _, err := server.refreshToken(t.Context(), httptest.NewRequest(http.MethodPost, "/token", nil), refreshRequest); err != nil {
 		t.Fatalf("failed refresh commit consumed the presented token: %v", err)
 	}

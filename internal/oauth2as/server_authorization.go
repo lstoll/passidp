@@ -35,9 +35,6 @@ type AuthRequest struct {
 	// compare [AuthTimeExceeded] against their session authentication time
 	// before calling [Server.GrantAuth].
 	MaxAge *int `json:"maxAge,omitzero"`
-
-	// Raw is the raw URL values that were passed in the request.
-	Raw url.Values `json:"raw,omitzero"`
 }
 
 func (s *Server) ParseAuthRequest(req *http.Request) (*AuthRequest, error) {
@@ -106,7 +103,6 @@ func (s *Server) ParseAuthRequest(req *http.Request) (*AuthRequest, error) {
 		ACRValues:     acrValues,
 		Nonce:         authreq.Nonce,
 		MaxAge:        authreq.MaxAge,
-		Raw:           authreq.Raw,
 	}, nil
 }
 
@@ -162,6 +158,26 @@ func (s *Server) GrantAuth(ctx context.Context, grant *AuthGrant) (redirectURI s
 		return "", fmt.Errorf("authentication time must not be in the future")
 	}
 
+	// Resolve and validate the redirect before writing either the grant or the
+	// authorization code. A failed response must not leave persistent records.
+	client, err := s.config.Clients.Client(ctx, grant.Request.ClientID)
+	if err != nil {
+		return "", fmt.Errorf("error getting client %s: %w", grant.Request.ClientID, err)
+	}
+	if client == nil {
+		return "", fmt.Errorf("client %s not found", grant.Request.ClientID)
+	}
+
+	redirURI, err := validateAndResolveRedirectURI(grant.Request.RedirectURI, client.RedirectURIs, grant.Request.ClientID)
+	if err != nil {
+		return "", err
+	}
+
+	redir, err := url.Parse(redirURI)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse authreq's URI: %w", err)
+	}
+
 	sg := &storedGrant{
 		UserID:          grant.UserID,
 		ClientID:        grant.Request.ClientID,
@@ -183,25 +199,6 @@ func (s *Server) GrantAuth(ctx context.Context, grant *AuthGrant) (redirectURI s
 	_, authCodeString, err := s.putGrantWithAuthCode(ctx, loadedGrant, now.Add(s.config.CodeValidityTime))
 	if err != nil {
 		return "", fmt.Errorf("failed to put grant with auth code: %w", err)
-	}
-
-	// Validate and resolve the redirect URI
-	client, err := s.config.Clients.Client(ctx, grant.Request.ClientID)
-	if err != nil {
-		return "", fmt.Errorf("error getting client %s: %w", grant.Request.ClientID, err)
-	}
-	if client == nil {
-		return "", fmt.Errorf("client %s not found", grant.Request.ClientID)
-	}
-
-	redirURI, err := validateAndResolveRedirectURI(grant.Request.RedirectURI, client.RedirectURIs, grant.Request.ClientID)
-	if err != nil {
-		return "", err
-	}
-
-	redir, err := url.Parse(redirURI)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse authreq's URI: %w", err)
 	}
 
 	codeResp := &oauth2proto.CodeAuthResponse{

@@ -555,6 +555,71 @@ func TestGrantAuth(t *testing.T) {
 	}
 }
 
+func TestGrantAuthInvalidClientOrRedirectDoesNotWrite(t *testing.T) {
+	testCases := []struct {
+		name    string
+		clients staticClientSource
+		request *AuthRequest
+	}{
+		{
+			name: "invalid redirect",
+			clients: staticClientSource{{
+				ID:           "test-client",
+				RedirectURIs: []string{"https://client.example.com/callback"},
+			}},
+			request: &AuthRequest{ClientID: "test-client", RedirectURI: "https://attacker.example/callback"},
+		},
+		{
+			name:    "removed client",
+			clients: staticClientSource{},
+			request: &AuthRequest{ClientID: "removed-client", RedirectURI: "https://client.example.com/callback"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := newTestStorage(t)
+			server := &Server{
+				config: Config{
+					Storage: storage,
+					Clients: tc.clients,
+				},
+				now: time.Now,
+			}
+
+			before := authorizationStorageCounts(t, storage)
+			_, err := server.GrantAuth(t.Context(), &AuthGrant{
+				Request: tc.request,
+				UserID:  "user123",
+			})
+			if err == nil {
+				t.Fatal("expected GrantAuth to fail")
+			}
+			if after := authorizationStorageCounts(t, storage); after != before {
+				t.Fatalf("storage row counts changed after failed grant: before %v, after %v", before, after)
+			}
+		})
+	}
+}
+
+func authorizationStorageCounts(t *testing.T, storage *Storage) [5]int64 {
+	t.Helper()
+	var counts [5]int64
+	tables := [...]string{
+		tblSchemaMigrations,
+		tblGrants,
+		tblAuthCodes,
+		tblRefreshTokens,
+		tblRefreshSessions,
+	}
+	for i, table := range tables {
+		if err := storage.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&counts[i]); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+	}
+	return counts
+}
+
 func TestGrantAuthStoresAuthenticatedAt(t *testing.T) {
 	storage := newTestStorage(t)
 	server := &Server{

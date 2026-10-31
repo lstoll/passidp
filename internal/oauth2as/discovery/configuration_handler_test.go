@@ -8,6 +8,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -167,6 +168,23 @@ func TestConfigurationHandlerDefaultsAndValidation(t *testing.T) {
 		if _, err := discovery.NewOIDCConfigurationHandler(config); err == nil {
 			t.Fatal("invalid configuration unexpectedly accepted")
 		}
+	}
+}
+
+func TestDefaultCoreMetadataAdvertisesSupportedFlows(t *testing.T) {
+	metadata := discovery.DefaultCoreMetadata("https://issuer.example")
+
+	if got, want := metadata.ResponseTypesSupported, []string{"code"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("response types = %v, want %v", got, want)
+	}
+	if got, want := metadata.GrantTypesSupported, []string{"authorization_code", "refresh_token"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("grant types = %v, want %v", got, want)
+	}
+	if got, want := metadata.TokenEndpointAuthMethodsSupported, []string{"none", "client_secret_basic", "client_secret_post", "private_key_jwt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("token endpoint auth methods = %v, want %v", got, want)
+	}
+	if got, want := metadata.IDTokenSigningAlgValuesSupported, []string{"ES256", "RS256"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ID token signing algorithms = %v, want %v", got, want)
 	}
 }
 

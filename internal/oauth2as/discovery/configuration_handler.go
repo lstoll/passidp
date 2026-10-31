@@ -64,14 +64,13 @@ func DefaultCoreMetadata(issuer string) *provider.OIDCProviderMetadata {
 		Issuer: issuer,
 		ResponseTypesSupported: []string{
 			"code",
-			"id_token",
-			"id_token token",
 		},
 		SubjectTypesSupported:            []string{"public"},
-		IDTokenSigningAlgValuesSupported: []string{"ES256"},
-		GrantTypesSupported:              []string{"authorization_code"},
+		IDTokenSigningAlgValuesSupported: []string{"ES256", "RS256"},
+		GrantTypesSupported:              []string{"authorization_code", "refresh_token"},
 		CodeChallengeMethodsSupported:    []provider.CodeChallengeMethod{provider.CodeChallengeMethodS256},
 		TokenEndpointAuthMethodsSupported: []string{
+			"none",
 			"client_secret_basic",
 			"client_secret_post",
 			"private_key_jwt",

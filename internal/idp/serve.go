@@ -332,7 +332,6 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	auth.OAuth2 = oauth2asServer
 
 	pmd := discovery.DefaultCoreMetadata(issuerURL.String())
-	pmd.IDTokenSigningAlgValuesSupported = []string{"ES256"}
 	pmd.AuthorizationEndpoint = issuerURL.String() + "/authorization"
 	pmd.TokenEndpoint = issuerURL.String() + "/token"
 	pmd.UserinfoEndpoint = issuerURL.String() + "/userinfo"

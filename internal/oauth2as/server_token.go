@@ -303,20 +303,6 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 
 	pt, _ := token.ParseUserToken(treq.RefreshToken, tokenUsageRefresh)
 
-	// Check if token is valid for use
-	if !loadedGrant.refreshToken.ValidUntil.After(s.now()) {
-		if loadedGrant.refreshToken.ReplacedByTokenID != "" {
-			// Token is expired AND replaced. This means it was used, rotated,
-			// and the grace period has passed. This is a likely replay/theft.
-			if err := s.config.Storage.expireGrant(ctx, loadedGrant.grantID); err != nil {
-				return nil, fmt.Errorf("failed to revoke grant on refresh token reuse: %w", err)
-			}
-			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
-		}
-		// Token is expired but not replaced. Just a normal expiration.
-		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
-	}
-
 	client, err := s.validateTokenClient(ctx, treq, loadedGrant.grant.ClientID)
 	if err != nil {
 		return nil, err
@@ -343,6 +329,21 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		if dpopProof == nil || dpopProof.Thumbprint == "" {
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "DPoP proof required"}
 		}
+	}
+
+	// Authenticate the client and sender before reuse detection can revoke the grant.
+	// ValidUntil on a replaced token is the end of its grace period.
+	if !loadedGrant.refreshToken.ValidUntil.After(s.now()) {
+		if loadedGrant.refreshToken.ReplacedByTokenID != "" {
+			// Token is expired AND replaced. This means it was used, rotated,
+			// and the grace period has passed. This is a likely replay/theft.
+			if err := s.config.Storage.expireGrant(ctx, loadedGrant.grantID); err != nil {
+				return nil, fmt.Errorf("failed to revoke grant on refresh token reuse: %w", err)
+			}
+			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
+		}
+		// Token is expired but not replaced. Just a normal expiration.
+		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
 	}
 
 	idTokenAlgorithm := s.defaultIDTokenSigningAlgorithm()
@@ -391,12 +392,12 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 	if replacedTokenID != "" {
 		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: replacedTokenID})
 	}
-	if prepared.refreshToken == nil || s.config.RefreshTokenRotationGracePeriod == 0 {
+	if prepared.refreshToken == nil {
 		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: pt.ID()})
-		if prepared.refreshToken == nil {
-			commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindSession, ID: loadedGrant.grantID})
-		}
+		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindSession, ID: loadedGrant.grantID})
 	} else {
+		// Retain consumed tokens through the grant lifetime, including with no
+		// grace period, so later reuse can revoke the active replacement.
 		if replacedTokenID == "" {
 			loadedGrant.refreshToken.ValidUntil = s.now().Add(s.config.RefreshTokenRotationGracePeriod)
 		}

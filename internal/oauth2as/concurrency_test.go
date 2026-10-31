@@ -127,7 +127,7 @@ func TestRefreshTokenConcurrency(t *testing.T) {
 	if err != nil || postGrant == nil {
 		t.Errorf("grant was unexpectedly revoked: %v", err)
 	}
-	if count := refreshTokenCount(t, s); count != 1 {
-		t.Fatalf("refresh token records = %d, want one active replacement", count)
+	if count := refreshTokenCount(t, s); count != 2 {
+		t.Fatalf("refresh token records = %d, want the consumed token and its replacement", count)
 	}
 }

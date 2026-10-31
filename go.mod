@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	cel.dev/cel-go v0.32.0
-	filippo.io/passkey v0.0.0-20260823133140-f9183523f3d8
+	filippo.io/passkey v0.0.0-20261026202536-7f1a37199ee0
 	github.com/alecthomas/kong v1.16.1
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.2

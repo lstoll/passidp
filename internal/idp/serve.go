@@ -254,10 +254,10 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 		return nil, fmt.Errorf("inserting force tls middleware: %w", err)
 	}
 
-	rp, err := passkey.NewRelyingParty(&passkey.Options{
-		RPID:   issuerURL.Hostname(),
-		Origin: issuerURL.Scheme + "://" + issuerURL.Host,
-	})
+	rp, err := passkey.NewRelyingParty(
+		issuerURL.Hostname(), issuerURL.Scheme+"://"+issuerURL.Host,
+		passkey.Options{Timeout: 5 * time.Minute},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("configuring passkey relying party: %w", err)
 	}

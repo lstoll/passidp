@@ -32,10 +32,7 @@ const (
 )
 
 func TestWebauthnAuth(t *testing.T) {
-	rp, err := passkey.NewRelyingParty(&passkey.Options{
-		RPID:   testRPID,
-		Origin: testOrigin,
-	})
+	rp, err := passkey.NewRelyingParty(testRPID, testOrigin, passkey.Options{})
 	if err != nil {
 		t.Fatalf("create relying party: %v", err)
 	}
@@ -149,7 +146,7 @@ func TestWebauthnAuth(t *testing.T) {
 }
 
 func TestLookupUser(t *testing.T) {
-	rp, err := passkey.NewRelyingParty(&passkey.Options{RPID: testRPID, Origin: testOrigin})
+	rp, err := passkey.NewRelyingParty(testRPID, testOrigin, passkey.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +359,7 @@ func createUserWithPasskey(t *testing.T, auth *Authenticator, registrationUserID
 	optionsJSON, err := auth.Passkey.NewRegistration(passkey.User{
 		ID:   passkeyUserID,
 		Name: user.Email,
-	}, records)
+	}, passkey.RegistrationOptions{ExcludeCredentials: records})
 	if err != nil {
 		t.Fatalf("begin registration: %v", err)
 	}

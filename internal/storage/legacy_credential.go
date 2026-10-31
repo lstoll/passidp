@@ -167,9 +167,8 @@ func synthesizeRegistrationAuthData(blob *legacyWebAuthnCredential, rpID string)
 		flags |= authDataFlagBS
 	}
 	// Older go-webauthn blobs (notably security keys) stored all-zero
-	// flags even after successful UV logins. Filippo will refuse those
-	// records unless UV or BE is set; treat a blank flags struct as
-	// unknown and assume UP+UV, which this IdP required at login.
+	// flags even after successful UV logins. Treat a blank flags struct
+	// as unknown and assume UP+UV, which this IdP required at login.
 	if flags == authDataFlagAT {
 		flags |= authDataFlagUP | authDataFlagUV
 	}

@@ -196,7 +196,7 @@ func (a *Authenticator) BeginLogin(ctx context.Context, w web.ResponseWriter, r 
 		return httperror.BadRequestErrf("flow expired")
 	}
 
-	request, optionsJSON, err := a.Passkey.NewLogin()
+	request, optionsJSON, err := a.Passkey.NewLogin(passkey.LoginOptions{})
 	if err != nil {
 		return fmt.Errorf("starting discoverable login: %w", err)
 	}

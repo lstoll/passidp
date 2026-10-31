@@ -183,7 +183,7 @@ func (s *Server) GrantAuth(ctx context.Context, grant *AuthGrant) (redirectURI s
 		AMR: slices.Clone(grant.AMR),
 	}
 
-	loadedGrant := &loadedAuthCodeGrant{
+	loadedGrant := &loadedGrant{
 		grant: sg,
 	}
 

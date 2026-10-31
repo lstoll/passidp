@@ -168,9 +168,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		return nil, fmt.Errorf("failed to get grant by auth code: %w", err)
 	}
 
-	pt, _ := token.ParseUserToken(treq.Code, tokenUsageAuthCode) // already parsed in getGrantFromAuthCode, so this is safe
 	if loadedGrant.grant.Request == nil {
-
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid grant"}
 	}
 
@@ -187,11 +185,6 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 	// Reject if PKCE is required but no code verifier was provided
 	if !client.SkipPKCE && treq.CodeVerifier == "" {
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeUnauthorizedClient, Description: "PKCE required, but code verifier not passed"}
-	}
-
-	idTokenAlgorithm := s.defaultIDTokenSigningAlgorithm()
-	if client.IDTokenSigningAlgorithm != "" {
-		idTokenAlgorithm = client.IDTokenSigningAlgorithm
 	}
 
 	// Verify the code verifier against the session data
@@ -222,49 +215,17 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		loadedGrant.additionalState.DPoPThumbprint = &dpopThumbprint
 	}
 
-	// Check if this grant is DPoP-bound by looking for thumbprint in metadata
-	var isDPoPBound bool
-	if loadedGrant.additionalState.DPoPThumbprint != nil && *loadedGrant.additionalState.DPoPThumbprint != "" {
-		isDPoPBound = true
-	}
-
-	tr := &TokenRequest{
-		Client:        client,
-		GrantID:       loadedGrant.grantID,
-		UserID:        loadedGrant.grant.UserID,
-		ClientID:      loadedGrant.grant.ClientID,
-		GrantedScopes: loadedGrant.grant.GrantedScopes,
-
-		ACR:             loadedGrant.grant.ACR,
-		AMR:             slices.Clone(loadedGrant.grant.AMR),
-		AuthenticatedAt: authTimeFromGrant(loadedGrant.grant),
-		MaxAge:          maxAgeFromGrant(loadedGrant.grant),
-		IsRefresh:       false,
-		DPoPBound:       isDPoPBound,
-		DPoPProof:       dpopProof,
-	}
-
-	// TODO: Make TokenHandler callback optional for code exchange
-	tresp, err := s.config.TokenHandler(ctx, tr)
-	if err != nil {
-		var uaerr unauthorizedErr
-		if errors.As(err, &uaerr) && uaerr.Unauthorized() {
-			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: uaerr.Error()}
-		}
-		return nil, &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "handler returned error", Cause: err}
-	}
-
-	prepared, err := s.buildTokenResponse(ctx, idTokenAlgorithm, loadedGrant, tresp, isDPoPBound)
+	prepared, err := s.prepareTokenResponse(ctx, client, loadedGrant, false, dpopProof)
 	if err != nil {
 		return nil, err
 	}
-	loadedGrant.grant.ID = loadedGrant.grantID
+
 	commit := tokenResponseCommit(loadedGrant.grant, prepared)
 	commit.Checks = append(commit.Checks,
-		storageCheck{Kind: storageKindAuthCode, ID: pt.ID(), Version: loadedGrant.authCode.storageVersion},
-		storageCheck{Kind: storageKindGrant, ID: loadedGrant.grantID, Version: loadedGrant.grant.storageVersion},
+		storageCheck{Kind: storageKindAuthCode, ID: loadedGrant.authCode.ID, Version: loadedGrant.authCode.storageVersion},
+		storageCheck{Kind: storageKindGrant, ID: loadedGrant.grant.ID, Version: loadedGrant.grant.storageVersion},
 	)
-	commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindAuthCode, ID: pt.ID()})
+	commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindAuthCode, ID: loadedGrant.authCode.ID})
 	if err := s.config.Storage.commit(ctx, commit); err != nil {
 		if errors.Is(err, errStorageConflict) {
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "authorization code already used"}
@@ -290,8 +251,6 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		}
 		return nil, fmt.Errorf("failed to get grant by refresh token: %w", err)
 	}
-
-	pt, _ := token.ParseUserToken(treq.RefreshToken, tokenUsageRefresh)
 
 	client, err := s.validateTokenClient(ctx, treq, loadedGrant.grant.ClientID)
 	if err != nil {
@@ -327,7 +286,7 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		if loadedGrant.refreshToken.ReplacedByTokenID != "" {
 			// Token is expired AND replaced. This means it was used, rotated,
 			// and the grace period has passed. This is a likely replay/theft.
-			if err := s.config.Storage.expireGrant(ctx, loadedGrant.grantID); err != nil {
+			if err := s.config.Storage.expireGrant(ctx, loadedGrant.grant.ID); err != nil {
 				return nil, fmt.Errorf("failed to revoke grant on refresh token reuse: %w", err)
 			}
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
@@ -336,55 +295,22 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid refresh token"}
 	}
 
-	idTokenAlgorithm := s.defaultIDTokenSigningAlgorithm()
-	if client.IDTokenSigningAlgorithm != "" {
-		idTokenAlgorithm = client.IDTokenSigningAlgorithm
-	}
-
-	// Check if this grant is DPoP-bound by looking for thumbprint in metadata
-	isDPoPBound := storedThumbprint != ""
-
-	tr := &TokenRequest{
-		Client:        client,
-		GrantID:       loadedGrant.grantID,
-		UserID:        loadedGrant.grant.UserID,
-		ClientID:      loadedGrant.grant.ClientID,
-		GrantedScopes: loadedGrant.grant.GrantedScopes,
-
-		ACR:             loadedGrant.grant.ACR,
-		AMR:             slices.Clone(loadedGrant.grant.AMR),
-		AuthenticatedAt: authTimeFromGrant(loadedGrant.grant),
-		MaxAge:          maxAgeFromGrant(loadedGrant.grant),
-		IsRefresh:       true,
-		DPoPBound:       isDPoPBound,
-		DPoPProof:       dpopProof,
-	}
-	tresp, err := s.config.TokenHandler(ctx, tr)
+	prepared, err := s.prepareTokenResponse(ctx, client, loadedGrant, true, dpopProof)
 	if err != nil {
-		var uaerr unauthorizedErr
-		if errors.As(err, &uaerr) && uaerr.Unauthorized() {
-			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: uaerr.Error()}
-		}
-		return nil, &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "handler returned error", Cause: err}
+		return nil, err
 	}
 
-	prepared, err := s.buildTokenResponse(ctx, idTokenAlgorithm, loadedGrant, tresp, isDPoPBound)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build refresh token response: %w", err)
-	}
-
-	loadedGrant.grant.ID = loadedGrant.grantID
 	commit := tokenResponseCommit(loadedGrant.grant, prepared)
 	commit.Checks = append(commit.Checks,
-		storageCheck{Kind: storageKindGrant, ID: loadedGrant.grantID, Version: loadedGrant.grant.storageVersion},
-		storageCheck{Kind: storageKindRefreshToken, ID: pt.ID(), Version: loadedGrant.refreshToken.storageVersion},
+		storageCheck{Kind: storageKindGrant, ID: loadedGrant.grant.ID, Version: loadedGrant.grant.storageVersion},
+		storageCheck{Kind: storageKindRefreshToken, ID: loadedGrant.refreshToken.ID, Version: loadedGrant.refreshToken.storageVersion},
 	)
 	if replacedTokenID != "" {
 		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: replacedTokenID})
 	}
 	if prepared.refreshToken == nil {
-		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: pt.ID()})
-		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindSession, ID: loadedGrant.grantID})
+		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: loadedGrant.refreshToken.ID})
+		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindSession, ID: loadedGrant.grant.ID})
 	} else {
 		// Retain consumed tokens through the grant lifetime, including with no
 		// grace period, so later reuse can revoke the active replacement.
@@ -392,7 +318,6 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 			loadedGrant.refreshToken.ValidUntil = s.now().Add(s.config.RefreshTokenRotationGracePeriod)
 		}
 		loadedGrant.refreshToken.ReplacedByTokenID = prepared.refreshTokenID
-		loadedGrant.refreshToken.ID = pt.ID()
 		commit.RefreshTokens = append(commit.RefreshTokens, *loadedGrant.refreshToken)
 	}
 
@@ -403,6 +328,38 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		return nil, fmt.Errorf("committing refresh token rotation: %w", err)
 	}
 	return prepared.response, nil
+}
+
+// prepareTokenResponse invokes application policy and signs the response before any commit.
+func (s *Server) prepareTokenResponse(ctx context.Context, client *Client, loaded *loadedGrant, isRefresh bool, proof *dpop.Proof) (*preparedTokenResponse, error) {
+	grant := loaded.grant
+	bound := loaded.dpopBound()
+	response, err := s.config.TokenHandler(ctx, &TokenRequest{
+		Client:          client,
+		GrantID:         grant.ID,
+		UserID:          grant.UserID,
+		ClientID:        grant.ClientID,
+		GrantedScopes:   slices.Clone(grant.GrantedScopes),
+		ACR:             grant.ACR,
+		AMR:             slices.Clone(grant.AMR),
+		AuthenticatedAt: authTimeFromGrant(grant),
+		MaxAge:          maxAgeFromGrant(grant),
+		IsRefresh:       isRefresh,
+		DPoPBound:       bound,
+		DPoPProof:       proof,
+	})
+	if err != nil {
+		var unauthorized unauthorizedErr
+		if errors.As(err, &unauthorized) && unauthorized.Unauthorized() {
+			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: unauthorized.Error()}
+		}
+		return nil, &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "handler returned error", Cause: err}
+	}
+	algorithm := s.defaultIDTokenSigningAlgorithm()
+	if client.IDTokenSigningAlgorithm != "" {
+		algorithm = client.IDTokenSigningAlgorithm
+	}
+	return s.buildTokenResponse(ctx, algorithm, loaded, response, bound)
 }
 
 func invalidDPoPProofError(cause error) *oauth2proto.TokenError {
@@ -418,42 +375,35 @@ type preparedTokenResponse struct {
 
 // buildTokenResponse creates and signs the complete response without changing
 // storage. The caller atomically commits the prepared grant and token records.
-func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Algorithm, loadedGrant grantLoader, tresp *TokenResponse, isDPoPBound bool) (*preparedTokenResponse, error) {
-	additionalState, err := json.Marshal(loadedGrant.AdditionalState())
+func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Algorithm, loadedGrant *loadedGrant, tresp *TokenResponse, isDPoPBound bool) (*preparedTokenResponse, error) {
+	additionalState, err := json.Marshal(&loadedGrant.additionalState)
 	if err != nil {
 		return nil, fmt.Errorf("marshalling additional grant state: %w", err)
 	}
-	loadedGrant.Grant().AdditionalState = additionalState
+	loadedGrant.grant.AdditionalState = additionalState
 
 	var refreshToken string
 	var rtID string
 	var storedRefreshToken *storedRefreshToken
 	var refreshSession *storedRefreshSession
-	if s.config.RefreshTokenValidity > 0 && slices.Contains(loadedGrant.Grant().GrantedScopes, oidc.ScopeOfflineAccess) {
+	if s.config.RefreshTokenValidity > 0 && slices.Contains(loadedGrant.grant.GrantedScopes, oidc.ScopeOfflineAccess) {
 		rtUntil := tresp.RefreshTokenValidUntil
 		if rtUntil.IsZero() {
 			rtUntil = s.now().Add(s.config.RefreshTokenValidity)
 		}
 
 		// Cap the refresh token expiry at the grant's absolute expiration
-		if rtUntil.After(loadedGrant.Grant().ExpiresAt) {
-			rtUntil = loadedGrant.Grant().ExpiresAt
+		if rtUntil.After(loadedGrant.grant.ExpiresAt) {
+			rtUntil = loadedGrant.grant.ExpiresAt
 		}
 
-		// Build a refresh token grant for creating the refresh token
-		rtGrant := &loadedRefreshTokenGrant{
-			grant:   loadedGrant.Grant(),
-			grantID: loadedGrant.GrantID(),
-
-			additionalState: *loadedGrant.AdditionalState(),
-		}
-		refreshToken, rtID, storedRefreshToken, err = prepareRefreshToken(rtGrant, rtUntil)
+		refreshToken, rtID, storedRefreshToken, err = prepareRefreshToken(loadedGrant.grant, rtUntil)
 		if err != nil {
 			return nil, fmt.Errorf("preparing refresh token: %w", err)
 		}
-		grant := loadedGrant.Grant()
+		grant := loadedGrant.grant
 		refreshSession = &storedRefreshSession{
-			GrantID:         loadedGrant.GrantID(),
+			GrantID:         loadedGrant.grant.ID,
 			UserID:          grant.UserID,
 			ClientID:        grant.ClientID,
 			GrantedScopes:   slices.Clone(grant.GrantedScopes),
@@ -464,8 +414,8 @@ func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Al
 		}
 	}
 
-	grant := loadedGrant.Grant()
-	ac, acExp, err := s.buildAccessTokenClaims(loadedGrant.GrantID(), grant, tresp)
+	grant := loadedGrant.grant
+	ac, acExp, err := s.buildAccessTokenClaims(loadedGrant.grant.ID, grant, tresp)
 	if err != nil {
 		return nil, fmt.Errorf("building access token claims: %w", err)
 	}

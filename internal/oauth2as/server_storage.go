@@ -17,54 +17,19 @@ var (
 	errGrantExpired      = errors.New("grant expired")
 )
 
-// grantLoader is an interface that represents a loaded grant, regardless of
-// how it was loaded (auth code or refresh token).
-type grantLoader interface {
-	Grant() *storedGrant
-	GrantID() string
-	AdditionalState() *storedAdditionalState
-	SetAdditionalState(storedAdditionalState)
-}
-
-// loadedAuthCodeGrant represents a grant loaded via an authorization code.
-// Auth codes are single use.
-type loadedAuthCodeGrant struct {
-	grant    *storedGrant
-	grantID  string
-	authCode *storedAuthCode
-
+// loadedGrant holds a grant and the credential used to load it.
+type loadedGrant struct {
+	grant           *storedGrant
+	authCode        *storedAuthCode
+	refreshToken    *storedRefreshToken
 	additionalState storedAdditionalState
 }
 
-func (l *loadedAuthCodeGrant) Grant() *storedGrant { return l.grant }
-func (l *loadedAuthCodeGrant) GrantID() string     { return l.grantID }
-func (l *loadedAuthCodeGrant) AdditionalState() *storedAdditionalState {
-	return &l.additionalState
-}
-func (l *loadedAuthCodeGrant) SetAdditionalState(state storedAdditionalState) {
-	l.additionalState = state
+func (l *loadedGrant) dpopBound() bool {
+	return l.additionalState.DPoPThumbprint != nil && *l.additionalState.DPoPThumbprint != ""
 }
 
-// loadedRefreshTokenGrant represents a grant loaded via a refresh token.
-// Refresh tokens support rotation and grace periods.
-type loadedRefreshTokenGrant struct {
-	grant        *storedGrant
-	grantID      string
-	refreshToken *storedRefreshToken
-
-	additionalState storedAdditionalState
-}
-
-func (l *loadedRefreshTokenGrant) Grant() *storedGrant { return l.grant }
-func (l *loadedRefreshTokenGrant) GrantID() string     { return l.grantID }
-func (l *loadedRefreshTokenGrant) AdditionalState() *storedAdditionalState {
-	return &l.additionalState
-}
-func (l *loadedRefreshTokenGrant) SetAdditionalState(state storedAdditionalState) {
-	l.additionalState = state
-}
-
-func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string) (*loadedAuthCodeGrant, error) {
+func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string) (*loadedGrant, error) {
 	parsedCode, err := token.ParseUserToken(presentedCode, tokenUsageAuthCode)
 	if err != nil {
 		return nil, errGrantTokenInvalid
@@ -94,9 +59,8 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 		return nil, errGrantTokenInvalid
 	}
 
-	loadedGrant := &loadedAuthCodeGrant{
+	loadedGrant := &loadedGrant{
 		grant:    grant,
-		grantID:  storedCode.GrantID,
 		authCode: storedCode,
 	}
 
@@ -109,7 +73,7 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 	return loadedGrant, nil
 }
 
-func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken string) (*loadedRefreshTokenGrant, error) {
+func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken string) (*loadedGrant, error) {
 	parsedToken, err := token.ParseUserToken(presentedToken, tokenUsageRefresh)
 	if err != nil {
 		return nil, errGrantTokenInvalid
@@ -140,9 +104,8 @@ func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken st
 		return nil, errGrantTokenInvalid
 	}
 
-	loadedGrant := &loadedRefreshTokenGrant{
+	loadedGrant := &loadedGrant{
 		grant:        grant,
-		grantID:      storedToken.GrantID,
 		refreshToken: storedToken,
 	}
 
@@ -156,7 +119,7 @@ func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken st
 }
 
 // putGrantWithAuthCode creates the grant and auth code, returning grant ID and token string.
-func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedAuthCodeGrant, codeExpiresAt time.Time) (grantID string, tokenString string, err error) {
+func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedGrant, codeExpiresAt time.Time) (grantID string, tokenString string, err error) {
 	addlb, err := json.Marshal(loadedGrant.additionalState)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal additional state: %w", err)
@@ -178,7 +141,6 @@ func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedAu
 		Code:             tok.Stored(),
 		ValidUntil:       codeExpiresAt,
 		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep code around as long as the grant
-
 	}
 	loadedGrant.grant.ID = grid
 	if err := s.config.Storage.commit(ctx, storageCommit{
@@ -200,28 +162,21 @@ func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedAu
 // prepareRefreshToken creates the opaque token and its storage record without
 // writing either the token or grant. The caller commits all related changes as
 // one conditional batch after the response has been successfully built.
-func prepareRefreshToken(loadedGrant *loadedRefreshTokenGrant, tokenExpiresAt time.Time) (tokenString string, tokenID string, storedToken *storedRefreshToken, err error) {
-	addlb, err := json.Marshal(loadedGrant.additionalState)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to marshal additional state: %w", err)
-	}
-	loadedGrant.grant.AdditionalState = addlb
-
-	if loadedGrant.grantID == "" {
+func prepareRefreshToken(grant *storedGrant, tokenExpiresAt time.Time) (tokenString string, tokenID string, storedToken *storedRefreshToken, err error) {
+	if grant.ID == "" {
 		return "", "", nil, fmt.Errorf("grant ID is required")
 	}
 	tid := uuid.NewV4().String()
-	tok, err := token.New(tokenUsageRefresh, tid, loadedGrant.grantID, loadedGrant.grant.UserID)
+	tok, err := token.New(tokenUsageRefresh, tid, grant.ID, grant.UserID)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
 	storedToken = &storedRefreshToken{
-		GrantID:          loadedGrant.grantID,
+		GrantID:          grant.ID,
 		Token:            tok.Stored(),
 		ValidUntil:       tokenExpiresAt,
-		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep token around as long as the grant
-
+		StorageExpiresAt: grant.ExpiresAt, // Keep token around as long as the grant
 	}
 	return tok.UserToken(), tid, storedToken, nil
 }

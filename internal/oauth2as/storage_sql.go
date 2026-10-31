@@ -29,7 +29,9 @@ const (
 	idxSessionActive    = "oauth2as_session_active_idx"
 )
 
-type sqlStorage struct {
+// Storage holds SQLite authorization-server state for one issuer.
+// Construct it with [NewSQLStorage].
+type Storage struct {
 	db         *sql.DB
 	migrations []sqlMigration
 
@@ -45,10 +47,10 @@ func NewSQLStorage(db *sql.DB) (*Storage, error) {
 	if db == nil {
 		return nil, errors.New("oauth2as: SQL database is required")
 	}
-	return &Storage{backend: &sqlStorage{db: db, migrations: sqlMigrations()}}, nil
+	return &Storage{db: db, migrations: sqlMigrations()}, nil
 }
 
-func (s *sqlStorage) conn(ctx context.Context) (*sql.Conn, error) {
+func (s *Storage) conn(ctx context.Context) (*sql.Conn, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -72,65 +74,65 @@ func truncateTime(t time.Time) time.Time {
 // sqliteTimeFormat is fixed-width UTC so TEXT timestamps sort chronologically.
 const sqliteTimeFormat = "2006-01-02T15:04:05.000000Z"
 
-func (s *sqlStorage) GetGrant(ctx context.Context, id string) (storedGrant, error) {
+func (s *Storage) getGrant(ctx context.Context, id string) (*storedGrant, error) {
 	conn, err := s.conn(ctx)
 	if err != nil {
-		return storedGrant{}, err
+		return nil, err
 	}
 	defer conn.Close()
 	grant, version, err := s.scanGrant(ctx, conn, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return storedGrant{}, ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return storedGrant{}, err
+		return nil, err
 	}
 	grant.ID = id
 	grant.storageVersion = version
-	return grant, nil
+	return &grant, nil
 }
 
-func (s *sqlStorage) GetAuthCode(ctx context.Context, id string) (storedAuthCode, error) {
+func (s *Storage) getAuthCode(ctx context.Context, id string) (*storedAuthCode, error) {
 	conn, err := s.conn(ctx)
 	if err != nil {
-		return storedAuthCode{}, err
+		return nil, err
 	}
 	defer conn.Close()
 	code, version, err := s.scanAuthCode(ctx, conn, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return storedAuthCode{}, ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return storedAuthCode{}, err
+		return nil, err
 	}
 	code.ID = id
 	code.storageVersion = version
-	return code, nil
+	return &code, nil
 }
 
-func (s *sqlStorage) GetRefreshToken(ctx context.Context, id string) (storedRefreshToken, error) {
+func (s *Storage) getRefreshToken(ctx context.Context, id string) (*storedRefreshToken, error) {
 	conn, err := s.conn(ctx)
 	if err != nil {
-		return storedRefreshToken{}, err
+		return nil, err
 	}
 	defer conn.Close()
 	token, version, err := s.scanRefreshToken(ctx, conn, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return storedRefreshToken{}, ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return storedRefreshToken{}, err
+		return nil, err
 	}
 	token.ID = id
 	token.storageVersion = version
-	return token, nil
+	return &token, nil
 }
 
 type sqlQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func (s *sqlStorage) scanGrant(ctx context.Context, q sqlQueryer, id string) (storedGrant, uint64, error) {
+func (s *Storage) scanGrant(ctx context.Context, q sqlQueryer, id string) (storedGrant, uint64, error) {
 	var (
 		grant   storedGrant
 		version uint64
@@ -147,7 +149,7 @@ func (s *sqlStorage) scanGrant(ctx context.Context, q sqlQueryer, id string) (st
 	return grant, version, nil
 }
 
-func (s *sqlStorage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) (storedAuthCode, uint64, error) {
+func (s *Storage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) (storedAuthCode, uint64, error) {
 	var (
 		code    storedAuthCode
 		version uint64
@@ -159,7 +161,7 @@ func (s *sqlStorage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) 
 	return code, version, nil
 }
 
-func (s *sqlStorage) scanRefreshToken(ctx context.Context, q sqlQueryer, id string) (storedRefreshToken, uint64, error) {
+func (s *Storage) scanRefreshToken(ctx context.Context, q sqlQueryer, id string) (storedRefreshToken, uint64, error) {
 	var (
 		token   storedRefreshToken
 		version uint64
@@ -171,7 +173,10 @@ func (s *sqlStorage) scanRefreshToken(ctx context.Context, q sqlQueryer, id stri
 	return token, version, nil
 }
 
-func (s *sqlStorage) Commit(ctx context.Context, commit storageCommit) error {
+func (s *Storage) commit(ctx context.Context, commit storageCommit) error {
+	if err := validateStorageCommit(commit); err != nil {
+		return err
+	}
 	if s.commitHook != nil {
 		if err := s.commitHook(commit); err != nil {
 			return err
@@ -198,10 +203,7 @@ func (s *sqlStorage) Commit(ctx context.Context, commit storageCommit) error {
 	return err
 }
 
-func (s *sqlStorage) commitOnce(ctx context.Context, commit storageCommit) error {
-	if err := validateStorageCommit(commit); err != nil {
-		return err
-	}
+func (s *Storage) commitOnce(ctx context.Context, commit storageCommit) error {
 	conn, err := s.conn(ctx)
 	if err != nil {
 		return err
@@ -226,9 +228,7 @@ func (s *sqlStorage) commitOnce(ctx context.Context, commit storageCommit) error
 		} else if !exists || version != check.Version {
 			return errStorageConflict
 		}
-		if exists {
-			versions[check.ref()] = version
-		}
+		versions[check.ref()] = version
 	}
 
 	for i := range commit.Grants {
@@ -305,7 +305,7 @@ func retryableSQLError(err error) bool {
 		strings.Contains(message, "sqlite_busy")
 }
 
-func (s *sqlStorage) putVersion(ctx context.Context, tx *sql.Tx, versions map[storageRef]uint64, ref storageRef) (uint64, error) {
+func (s *Storage) putVersion(ctx context.Context, tx *sql.Tx, versions map[storageRef]uint64, ref storageRef) (uint64, error) {
 	if version, ok := versions[ref]; ok {
 		return version + 1, nil
 	}
@@ -319,7 +319,7 @@ func (s *sqlStorage) putVersion(ctx context.Context, tx *sql.Tx, versions map[st
 	return version + 1, nil
 }
 
-func (s *sqlStorage) version(ctx context.Context, tx *sql.Tx, ref storageRef) (uint64, bool, error) {
+func (s *Storage) version(ctx context.Context, tx *sql.Tx, ref storageRef) (uint64, bool, error) {
 	table, idColumn, err := s.tableForKind(ref.Kind)
 	if err != nil {
 		return 0, false, err
@@ -333,7 +333,7 @@ func (s *sqlStorage) version(ctx context.Context, tx *sql.Tx, ref storageRef) (u
 	return version, err == nil, err
 }
 
-func (s *sqlStorage) tableForKind(kind storageKind) (table, idColumn string, err error) {
+func (s *Storage) tableForKind(kind storageKind) (table, idColumn string, err error) {
 	switch kind {
 	case storageKindGrant:
 		return tblGrants, "id", nil
@@ -348,7 +348,7 @@ func (s *sqlStorage) tableForKind(kind storageKind) (table, idColumn string, err
 	}
 }
 
-func (s *sqlStorage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant, version uint64, exists bool) error {
+func (s *Storage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
 		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, request = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, additional_state = ?, metadata = ?, encrypted_metadata = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
@@ -364,7 +364,7 @@ func (s *sqlStorage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant
 		})
 }
 
-func (s *sqlStorage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
+func (s *Storage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
 		"INSERT INTO "+tblAuthCodes+" (id, grant_id, code, valid_until, delete_after, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		"UPDATE "+tblAuthCodes+" SET grant_id = ?, code = ?, valid_until = ?, delete_after = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
@@ -372,7 +372,7 @@ func (s *sqlStorage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAu
 		[]any{value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.EncryptedGrantKey), version, value.ID})
 }
 
-func (s *sqlStorage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
+func (s *Storage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
 		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, token = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
@@ -380,7 +380,7 @@ func (s *sqlStorage) putRefreshToken(ctx context.Context, tx *sql.Tx, value stor
 		[]any{value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), nullOf(&value.EncryptedGrantKey), version, value.ID})
 }
 
-func (s *sqlStorage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
+func (s *Storage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
 		"INSERT INTO "+tblRefreshSessions+" (grant_id, expires_at, last_used_at, version) VALUES (?, ?, ?, ?)",
 		"UPDATE "+tblRefreshSessions+" SET expires_at = ?, last_used_at = ?, version = ? WHERE grant_id = ?",
@@ -388,7 +388,7 @@ func (s *sqlStorage) putSession(ctx context.Context, tx *sql.Tx, value storedRef
 		[]any{s.timeOf(&value.ExpiresAt), s.timeOf(&value.LastUsedAt), version, value.GrantID})
 }
 
-func (s *sqlStorage) upsert(ctx context.Context, tx *sql.Tx, exists bool, insert, update string, insertArgs, updateArgs []any) error {
+func (s *Storage) upsert(ctx context.Context, tx *sql.Tx, exists bool, insert, update string, insertArgs, updateArgs []any) error {
 	query, args := insert, insertArgs
 	if exists {
 		query, args = update, updateArgs
@@ -397,7 +397,7 @@ func (s *sqlStorage) upsert(ctx context.Context, tx *sql.Tx, exists bool, insert
 	return err
 }
 
-func (s *sqlStorage) deleteRef(ctx context.Context, tx *sql.Tx, ref storageRef) error {
+func (s *Storage) deleteRef(ctx context.Context, tx *sql.Tx, ref storageRef) error {
 	table, idColumn, err := s.tableForKind(ref.Kind)
 	if err != nil {
 		return err
@@ -406,7 +406,7 @@ func (s *sqlStorage) deleteRef(ctx context.Context, tx *sql.Tx, ref storageRef) 
 	return err
 }
 
-func (s *sqlStorage) ListRefreshSessions(ctx context.Context, query storageRefreshSessionQuery) ([]storedRefreshSession, error) {
+func (s *Storage) listRefreshSessions(ctx context.Context, query storageRefreshSessionQuery) ([]storedRefreshSession, error) {
 	conn, err := s.conn(ctx)
 	if err != nil {
 		return nil, err
@@ -457,7 +457,7 @@ func (s *sqlStorage) ListRefreshSessions(ctx context.Context, query storageRefre
 	return result, nil
 }
 
-func (s *sqlStorage) Cleanup(ctx context.Context, options CleanupOptions) (CleanupResult, error) {
+func (s *Storage) cleanup(ctx context.Context, options CleanupOptions) (CleanupResult, error) {
 	conn, err := s.conn(ctx)
 	if err != nil {
 		return CleanupResult{}, err
@@ -505,7 +505,7 @@ func (s *sqlStorage) Cleanup(ctx context.Context, options CleanupOptions) (Clean
 	return CleanupResult{Deleted: deleted, More: more}, nil
 }
 
-func (s *sqlStorage) hasExpired(ctx context.Context, tx *sql.Tx, cutoff any) (bool, error) {
+func (s *Storage) hasExpired(ctx context.Context, tx *sql.Tx, cutoff any) (bool, error) {
 	query := "SELECT EXISTS (" +
 		"SELECT 1 FROM " + tblRefreshSessions + " WHERE expires_at <= ? " +
 		"UNION ALL SELECT 1 FROM " + tblAuthCodes + " WHERE delete_after <= ? " +
@@ -523,7 +523,8 @@ type sqlMigration struct {
 	up      []string
 }
 
-func (s *sqlStorage) Migrate(ctx context.Context) error {
+// Migrate applies pending schema migrations. It is safe to call on every process start.
+func (s *Storage) Migrate(ctx context.Context) error {
 	var err error
 	for attempt := range 4 {
 		err = s.migrateOnce(ctx)
@@ -545,7 +546,7 @@ func (s *sqlStorage) Migrate(ctx context.Context) error {
 	return err
 }
 
-func (s *sqlStorage) migrateOnce(ctx context.Context) error {
+func (s *Storage) migrateOnce(ctx context.Context) error {
 	conn, err := s.conn(ctx)
 	if err != nil {
 		return err
@@ -686,11 +687,11 @@ func nullOf[T ~string | ~[]byte](v *T) *sqlNull[T] {
 	return &sqlNull[T]{v: v}
 }
 
-func (s *sqlStorage) timeOf(t *time.Time) *sqlTime {
+func (s *Storage) timeOf(t *time.Time) *sqlTime {
 	return &sqlTime{t: t}
 }
 
-func (s *sqlStorage) nullTime(t *time.Time) *sqlTime {
+func (s *Storage) nullTime(t *time.Time) *sqlTime {
 	return &sqlTime{t: t, nullable: true}
 }
 

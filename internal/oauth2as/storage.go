@@ -146,12 +146,6 @@ type storedRefreshSession struct {
 	DPoPBound       bool
 }
 
-// Storage is an opaque authorization-server storage implementation. Construct
-// one with [NewSQLStorage]. A Storage must be dedicated to one issuer.
-type Storage struct {
-	backend *sqlStorage
-}
-
 // CleanupOptions controls physical removal of expired storage records.
 type CleanupOptions struct {
 	// Before removes records whose physical retention deadline is at or before
@@ -177,12 +171,6 @@ const (
 	maxCleanupLimit     = 10_000
 )
 
-// Migrate applies pending schema migrations. It is safe to call on every
-// process start.
-func (s *Storage) Migrate(ctx context.Context) error {
-	return s.backend.Migrate(ctx)
-}
-
 // Cleanup physically removes expired storage records. Protocol validity does
 // not depend on cleanup being run.
 func (s *Storage) Cleanup(ctx context.Context, options CleanupOptions) (CleanupResult, error) {
@@ -195,38 +183,7 @@ func (s *Storage) Cleanup(ctx context.Context, options CleanupOptions) (CleanupR
 	if options.Limit < 0 || options.Limit > maxCleanupLimit {
 		return CleanupResult{}, errors.New("oauth2as: cleanup limit must be between 0 and 10000")
 	}
-	return s.backend.Cleanup(ctx, options)
-}
-
-func (s *Storage) getGrant(ctx context.Context, id string) (*storedGrant, error) {
-	grant, err := s.backend.GetGrant(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return &grant, nil
-}
-
-func (s *Storage) getAuthCode(ctx context.Context, id string) (*storedAuthCode, error) {
-	code, err := s.backend.GetAuthCode(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return &code, nil
-}
-
-func (s *Storage) getRefreshToken(ctx context.Context, id string) (*storedRefreshToken, error) {
-	token, err := s.backend.GetRefreshToken(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return &token, nil
-}
-
-func (s *Storage) commit(ctx context.Context, commit storageCommit) error {
-	if err := validateStorageCommit(commit); err != nil {
-		return err
-	}
-	return s.backend.Commit(ctx, commit)
+	return s.cleanup(ctx, options)
 }
 
 type storageRefreshSessionQuery struct {
@@ -236,10 +193,6 @@ type storageRefreshSessionQuery struct {
 	AfterLastUsed time.Time
 	AfterGrantID  string
 	Limit         int
-}
-
-func (s *Storage) listRefreshSessions(ctx context.Context, query storageRefreshSessionQuery) ([]storedRefreshSession, error) {
-	return s.backend.ListRefreshSessions(ctx, query)
 }
 
 func validateStorageCommit(commit storageCommit) error {

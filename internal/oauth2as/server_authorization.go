@@ -119,14 +119,6 @@ type AuthGrant struct {
 	// [Server.GrantAuth] uses the current time. This value is emitted as the
 	// auth_time claim in ID tokens.
 	AuthenticatedAt time.Time
-	// Metadata is arbitrary metadata that can be stored with the grant. Can be
-	// used for auditing or tracking other information that is associated with
-	// the grant. This is not sensitive, and can be accessed at any time.
-	Metadata []byte
-	// EncryptedMetadata is the encrypted metadata that can be stored with the
-	// grant. This is only available to token callbacks. Can be used to store
-	// sensitive, grant-specific information like upstream auth tokens.
-	EncryptedMetadata []byte
 	// ExpiresAt is the time at which the grant will expire. If zero, the
 	// default grant validity will be used to calculate this.
 	ExpiresAt time.Time
@@ -186,14 +178,13 @@ func (s *Server) GrantAuth(ctx context.Context, grant *AuthGrant) (redirectURI s
 		GrantedAt:       now,
 		AuthenticatedAt: authenticatedAt,
 		ExpiresAt:       expiresAt, // Grant has absolute lifetime
-		Metadata:        grant.Metadata,
-		ACR:             grant.ACR,
-		AMR:             slices.Clone(grant.AMR),
+
+		ACR: grant.ACR,
+		AMR: slices.Clone(grant.AMR),
 	}
 
 	loadedGrant := &loadedAuthCodeGrant{
-		grant:             sg,
-		decryptedMetadata: grant.EncryptedMetadata,
+		grant: sg,
 	}
 
 	_, authCodeString, err := s.putGrantWithAuthCode(ctx, loadedGrant, now.Add(s.config.CodeValidityTime))

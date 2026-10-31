@@ -1,7 +1,6 @@
 package oauth2as
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,8 +26,6 @@ type UserinfoRequest struct {
 	Subject string
 	// GrantID is the ID of the grant associated with the access token.
 	GrantID string
-	// Metadata is unencrypted application metadata from the grant.
-	Metadata []byte
 	// GrantedScopes are the scopes granted on the associated grant.
 	GrantedScopes []string
 	// ACR is the Authentication Context Class Reference from the grant.
@@ -149,9 +146,9 @@ func (s *Server) UserinfoHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	uireq := &UserinfoRequest{
-		Subject:         atSub,
-		GrantID:         grantID,
-		Metadata:        bytes.Clone(grant.Metadata),
+		Subject: atSub,
+		GrantID: grantID,
+
 		GrantedScopes:   slices.Clone(grant.GrantedScopes),
 		ACR:             grant.ACR,
 		AMR:             slices.Clone(grant.AMR),

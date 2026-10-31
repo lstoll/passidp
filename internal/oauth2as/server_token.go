@@ -61,11 +61,6 @@ type TokenRequest struct {
 	ClientID string
 	// GrantedScopes are the scopes that were granted.
 	GrantedScopes []string
-	// Metadata is the metadata that was associated with the grant.
-	Metadata []byte
-	// DecryptedMetadata is the decrypted metadata that was associated with the
-	// grant.
-	DecryptedMetadata []byte
 	// ACR is the Authentication Context Class Reference satisfied for this grant.
 	ACR string
 	// AMR lists the Authentication Methods References for this grant.
@@ -102,13 +97,6 @@ type TokenResponse struct {
 	// RefreshTokenValidUntil indicates how long the returned refresh token should
 	// be valid for, if one is issued. If zero, the default will be used.
 	RefreshTokenValidUntil time.Time
-
-	// Metadata is the metadata that was associated with the grant. If nil, the
-	// existing metadata will be re-used.
-	Metadata []byte
-	// EncryptedMetadata is the encrypted metadata that was associated with the
-	// grant. If nil, the existing encrypted metadata will be re-used.
-	EncryptedMetadata []byte
 }
 
 // TokenHandler is used to handle the access token endpoint for code flow
@@ -241,20 +229,19 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 	}
 
 	tr := &TokenRequest{
-		Client:            client,
-		GrantID:           loadedGrant.grantID,
-		UserID:            loadedGrant.grant.UserID,
-		ClientID:          loadedGrant.grant.ClientID,
-		GrantedScopes:     loadedGrant.grant.GrantedScopes,
-		Metadata:          loadedGrant.grant.Metadata,
-		DecryptedMetadata: loadedGrant.decryptedMetadata,
-		ACR:               loadedGrant.grant.ACR,
-		AMR:               slices.Clone(loadedGrant.grant.AMR),
-		AuthenticatedAt:   authTimeFromGrant(loadedGrant.grant),
-		MaxAge:            maxAgeFromGrant(loadedGrant.grant),
-		IsRefresh:         false,
-		DPoPBound:         isDPoPBound,
-		DPoPProof:         dpopProof,
+		Client:        client,
+		GrantID:       loadedGrant.grantID,
+		UserID:        loadedGrant.grant.UserID,
+		ClientID:      loadedGrant.grant.ClientID,
+		GrantedScopes: loadedGrant.grant.GrantedScopes,
+
+		ACR:             loadedGrant.grant.ACR,
+		AMR:             slices.Clone(loadedGrant.grant.AMR),
+		AuthenticatedAt: authTimeFromGrant(loadedGrant.grant),
+		MaxAge:          maxAgeFromGrant(loadedGrant.grant),
+		IsRefresh:       false,
+		DPoPBound:       isDPoPBound,
+		DPoPProof:       dpopProof,
 	}
 
 	// TODO: Make TokenHandler callback optional for code exchange
@@ -358,20 +345,19 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 	isDPoPBound := storedThumbprint != ""
 
 	tr := &TokenRequest{
-		Client:            client,
-		GrantID:           loadedGrant.grantID,
-		UserID:            loadedGrant.grant.UserID,
-		ClientID:          loadedGrant.grant.ClientID,
-		GrantedScopes:     loadedGrant.grant.GrantedScopes,
-		Metadata:          loadedGrant.grant.Metadata,
-		DecryptedMetadata: loadedGrant.decryptedMetadata,
-		ACR:               loadedGrant.grant.ACR,
-		AMR:               slices.Clone(loadedGrant.grant.AMR),
-		AuthenticatedAt:   authTimeFromGrant(loadedGrant.grant),
-		MaxAge:            maxAgeFromGrant(loadedGrant.grant),
-		IsRefresh:         true,
-		DPoPBound:         isDPoPBound,
-		DPoPProof:         dpopProof,
+		Client:        client,
+		GrantID:       loadedGrant.grantID,
+		UserID:        loadedGrant.grant.UserID,
+		ClientID:      loadedGrant.grant.ClientID,
+		GrantedScopes: loadedGrant.grant.GrantedScopes,
+
+		ACR:             loadedGrant.grant.ACR,
+		AMR:             slices.Clone(loadedGrant.grant.AMR),
+		AuthenticatedAt: authTimeFromGrant(loadedGrant.grant),
+		MaxAge:          maxAgeFromGrant(loadedGrant.grant),
+		IsRefresh:       true,
+		DPoPBound:       isDPoPBound,
+		DPoPProof:       dpopProof,
 	}
 	tresp, err := s.config.TokenHandler(ctx, tr)
 	if err != nil {
@@ -433,13 +419,6 @@ type preparedTokenResponse struct {
 // buildTokenResponse creates and signs the complete response without changing
 // storage. The caller atomically commits the prepared grant and token records.
 func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Algorithm, loadedGrant grantLoader, tresp *TokenResponse, isDPoPBound bool) (*preparedTokenResponse, error) {
-	// Update metadata from the handler response
-	if tresp.Metadata != nil {
-		loadedGrant.Grant().Metadata = tresp.Metadata
-	}
-	if tresp.EncryptedMetadata != nil {
-		loadedGrant.SetDecryptedMetadata(tresp.EncryptedMetadata)
-	}
 	additionalState, err := json.Marshal(loadedGrant.AdditionalState())
 	if err != nil {
 		return nil, fmt.Errorf("marshalling additional grant state: %w", err)
@@ -463,10 +442,10 @@ func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Al
 
 		// Build a refresh token grant for creating the refresh token
 		rtGrant := &loadedRefreshTokenGrant{
-			grant:             loadedGrant.Grant(),
-			grantID:           loadedGrant.GrantID(),
-			decryptedMetadata: loadedGrant.DecryptedMetadata(),
-			additionalState:   *loadedGrant.AdditionalState(),
+			grant:   loadedGrant.Grant(),
+			grantID: loadedGrant.GrantID(),
+
+			additionalState: *loadedGrant.AdditionalState(),
 		}
 		refreshToken, rtID, storedRefreshToken, err = prepareRefreshToken(rtGrant, rtUntil)
 		if err != nil {

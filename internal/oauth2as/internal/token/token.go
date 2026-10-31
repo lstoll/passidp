@@ -52,7 +52,7 @@ func (p *ParsedToken) Verify(storedValue []byte, grantID, subject string) (*Toke
 	if p == nil || len(storedValue) != sha256.Size {
 		return nil, errInvalidToken
 	}
-	stored, kek, context, err := deriveTokenMaterial(p.secret, p.usage, p.id, grantID, subject)
+	stored, err := deriveStoredVerifier(p.secret, p.usage, p.id, grantID, subject)
 	if err != nil {
 		return nil, fmt.Errorf("deriving token material: %w", err)
 	}
@@ -60,12 +60,10 @@ func (p *ParsedToken) Verify(storedValue []byte, grantID, subject string) (*Toke
 		return nil, errInvalidToken
 	}
 	return &Token{
-		usage:   p.usage,
-		id:      p.id,
-		secret:  p.secret,
-		stored:  stored,
-		kek:     kek,
-		context: context,
+		usage:  p.usage,
+		id:     p.id,
+		secret: p.secret,
+		stored: stored,
 	}, nil
 }
 
@@ -75,11 +73,6 @@ type Token struct {
 	id     string
 	secret [secretSize]byte
 	stored [sha256.Size]byte
-	kek    [32]byte
-
-	// context is the canonical usage/token/grant/subject binding used as AEAD
-	// associated data when wrapping a grant key.
-	context []byte
 }
 
 // New generates a token bound to its storage record, grant, and subject.
@@ -94,17 +87,15 @@ func New(usage Usage, tokenID, grantID, subject string) (Token, error) {
 	if _, err := rand.Read(secret[:]); err != nil {
 		return Token{}, fmt.Errorf("generating token secret: %w", err)
 	}
-	stored, kek, context, err := deriveTokenMaterial(secret, usage, tokenID, grantID, subject)
+	stored, err := deriveStoredVerifier(secret, usage, tokenID, grantID, subject)
 	if err != nil {
 		return Token{}, fmt.Errorf("deriving token material: %w", err)
 	}
 	return Token{
-		usage:   usage,
-		id:      tokenID,
-		secret:  secret,
-		stored:  stored,
-		kek:     kek,
-		context: context,
+		usage:  usage,
+		id:     tokenID,
+		secret: secret,
+		stored: stored,
 	}, nil
 }
 
@@ -163,32 +154,22 @@ func ParseUserToken(userToken string, expected Usage) (*ParsedToken, error) {
 	return parsed, nil
 }
 
-func deriveTokenMaterial(secret [secretSize]byte, usage Usage, tokenID, grantID, subject string) (stored, kek [32]byte, context []byte, err error) {
-	context, err = encodeContext("token-binding", tokenVersion, usage.Name, usage.Prefix, tokenID, grantID, subject)
+func deriveStoredVerifier(secret [secretSize]byte, usage Usage, tokenID, grantID, subject string) (stored [32]byte, err error) {
+	context, err := encodeContext("token-binding", tokenVersion, usage.Name, usage.Prefix, tokenID, grantID, subject)
 	if err != nil {
-		return stored, kek, nil, err
+		return stored, err
 	}
-	storedInfo, err := encodeContext("stored-verifier", string(context))
+	info, err := encodeContext("stored-verifier", string(context))
 	if err != nil {
-		return stored, kek, nil, err
+		return stored, err
 	}
-	kekInfo, err := encodeContext("grant-key-encryption", string(context))
+	derived, err := hkdf.Key(sha256.New, secret[:], tokenKDFSaltV1, string(info), len(stored))
 	if err != nil {
-		return stored, kek, nil, err
-	}
-	derived, err := hkdf.Key(sha256.New, secret[:], tokenKDFSaltV1, string(storedInfo), len(stored))
-	if err != nil {
-		return stored, kek, nil, err
+		return stored, err
 	}
 	copy(stored[:], derived)
 	clear(derived)
-	derived, err = hkdf.Key(sha256.New, secret[:], tokenKDFSaltV1, string(kekInfo), len(kek))
-	if err != nil {
-		return stored, kek, nil, err
-	}
-	copy(kek[:], derived)
-	clear(derived)
-	return stored, kek, context, nil
+	return stored, nil
 }
 
 func validateUsage(usage Usage) error {

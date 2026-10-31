@@ -22,27 +22,22 @@ var (
 type grantLoader interface {
 	Grant() *storedGrant
 	GrantID() string
-	DecryptedMetadata() []byte
-	SetDecryptedMetadata([]byte)
 	AdditionalState() *storedAdditionalState
 	SetAdditionalState(storedAdditionalState)
 }
 
 // loadedAuthCodeGrant represents a grant loaded via an authorization code.
-// Auth codes are simpler - they don't support rotation or encrypted grant keys.
+// Auth codes are single use.
 type loadedAuthCodeGrant struct {
-	grant             *storedGrant
-	grantID           string
-	authCode          *storedAuthCode
-	decryptedMetadata []byte
-	additionalState   storedAdditionalState
-	grantKey          *token.GrantKey
+	grant    *storedGrant
+	grantID  string
+	authCode *storedAuthCode
+
+	additionalState storedAdditionalState
 }
 
-func (l *loadedAuthCodeGrant) Grant() *storedGrant              { return l.grant }
-func (l *loadedAuthCodeGrant) GrantID() string                  { return l.grantID }
-func (l *loadedAuthCodeGrant) DecryptedMetadata() []byte        { return l.decryptedMetadata }
-func (l *loadedAuthCodeGrant) SetDecryptedMetadata(data []byte) { l.decryptedMetadata = data }
+func (l *loadedAuthCodeGrant) Grant() *storedGrant { return l.grant }
+func (l *loadedAuthCodeGrant) GrantID() string     { return l.grantID }
 func (l *loadedAuthCodeGrant) AdditionalState() *storedAdditionalState {
 	return &l.additionalState
 }
@@ -51,20 +46,17 @@ func (l *loadedAuthCodeGrant) SetAdditionalState(state storedAdditionalState) {
 }
 
 // loadedRefreshTokenGrant represents a grant loaded via a refresh token.
-// Refresh tokens support rotation, grace periods, and encrypted grant keys.
+// Refresh tokens support rotation and grace periods.
 type loadedRefreshTokenGrant struct {
-	grant             *storedGrant
-	grantID           string
-	refreshToken      *storedRefreshToken
-	decryptedMetadata []byte
-	additionalState   storedAdditionalState
-	grantKey          *token.GrantKey
+	grant        *storedGrant
+	grantID      string
+	refreshToken *storedRefreshToken
+
+	additionalState storedAdditionalState
 }
 
-func (l *loadedRefreshTokenGrant) Grant() *storedGrant              { return l.grant }
-func (l *loadedRefreshTokenGrant) GrantID() string                  { return l.grantID }
-func (l *loadedRefreshTokenGrant) DecryptedMetadata() []byte        { return l.decryptedMetadata }
-func (l *loadedRefreshTokenGrant) SetDecryptedMetadata(data []byte) { l.decryptedMetadata = data }
+func (l *loadedRefreshTokenGrant) Grant() *storedGrant { return l.grant }
+func (l *loadedRefreshTokenGrant) GrantID() string     { return l.grantID }
 func (l *loadedRefreshTokenGrant) AdditionalState() *storedAdditionalState {
 	return &l.additionalState
 }
@@ -97,7 +89,7 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 		return nil, errGrantExpired
 	}
 
-	verifiedToken, err := parsedCode.Verify(storedCode.Code, storedCode.GrantID, grant.UserID)
+	_, err = parsedCode.Verify(storedCode.Code, storedCode.GrantID, grant.UserID)
 	if err != nil {
 		return nil, errGrantTokenInvalid
 	}
@@ -111,23 +103,6 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 	if len(grant.AdditionalState) > 0 {
 		if err := json.Unmarshal(grant.AdditionalState, &loadedGrant.additionalState); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal additional state: %w", err)
-		}
-	}
-
-	if len(storedCode.EncryptedGrantKey) > 0 {
-		loadedGrant.grantKey, err = verifiedToken.UnwrapGrantKey(storedCode.EncryptedGrantKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt grant key: %w", err)
-		}
-	}
-
-	if len(grant.EncryptedMetadata) > 0 {
-		if loadedGrant.grantKey == nil {
-			return nil, fmt.Errorf("grant missing encryption key")
-		}
-		loadedGrant.decryptedMetadata, err = loadedGrant.grantKey.DecryptMetadata(grant.EncryptedMetadata, storedCode.GrantID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt metadata with grant key: %w", err)
 		}
 	}
 
@@ -160,7 +135,7 @@ func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken st
 		return nil, errGrantExpired
 	}
 
-	verifiedToken, err := parsedToken.Verify(storedToken.Token, storedToken.GrantID, grant.UserID)
+	_, err = parsedToken.Verify(storedToken.Token, storedToken.GrantID, grant.UserID)
 	if err != nil {
 		return nil, errGrantTokenInvalid
 	}
@@ -171,26 +146,9 @@ func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken st
 		refreshToken: storedToken,
 	}
 
-	if len(storedToken.EncryptedGrantKey) > 0 {
-		loadedGrant.grantKey, err = verifiedToken.UnwrapGrantKey(storedToken.EncryptedGrantKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt grant key: %w", err)
-		}
-	}
-
 	if len(grant.AdditionalState) > 0 {
 		if err := json.Unmarshal(grant.AdditionalState, &loadedGrant.additionalState); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal additional state: %w", err)
-		}
-	}
-
-	if len(grant.EncryptedMetadata) > 0 {
-		if loadedGrant.grantKey == nil {
-			return nil, fmt.Errorf("grant missing encryption key")
-		}
-		loadedGrant.decryptedMetadata, err = loadedGrant.grantKey.DecryptMetadata(grant.EncryptedMetadata, storedToken.GrantID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt metadata with grant key: %w", err)
 		}
 	}
 
@@ -214,36 +172,13 @@ func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedAu
 		return "", "", fmt.Errorf("failed to generate authorization code: %w", err)
 	}
 
-	var encryptedGrantKey []byte
-	if len(loadedGrant.decryptedMetadata) > 0 {
-		if loadedGrant.grantKey == nil {
-			loadedGrant.grantKey, err = token.GenerateGrantKey()
-			if err != nil {
-				return "", "", fmt.Errorf("failed to generate grant key: %w", err)
-			}
-		}
-
-		// Encrypt metadata with the Grant Key
-		encryptedMetadata, err := loadedGrant.grantKey.EncryptMetadata(loadedGrant.decryptedMetadata, grid)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to encrypt metadata: %w", err)
-		}
-		loadedGrant.grant.EncryptedMetadata = encryptedMetadata
-
-		// Encrypt the Grant Key with the new Token
-		encryptedGrantKey, err = loadedGrant.grantKey.WrapForToken(&tok)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to encrypt grant key: %w", err)
-		}
-	}
-
 	storedCode := &storedAuthCode{
-		ID:                cid,
-		GrantID:           grid,
-		Code:              tok.Stored(),
-		ValidUntil:        codeExpiresAt,
-		StorageExpiresAt:  loadedGrant.grant.ExpiresAt, // Keep code around as long as the grant
-		EncryptedGrantKey: encryptedGrantKey,
+		ID:               cid,
+		GrantID:          grid,
+		Code:             tok.Stored(),
+		ValidUntil:       codeExpiresAt,
+		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep code around as long as the grant
+
 	}
 	loadedGrant.grant.ID = grid
 	if err := s.config.Storage.commit(ctx, storageCommit{
@@ -272,46 +207,21 @@ func prepareRefreshToken(loadedGrant *loadedRefreshTokenGrant, tokenExpiresAt ti
 	}
 	loadedGrant.grant.AdditionalState = addlb
 
-	if len(loadedGrant.decryptedMetadata) > 0 {
-		if loadedGrant.grantKey == nil {
-			loadedGrant.grantKey, err = token.GenerateGrantKey()
-			if err != nil {
-				return "", "", nil, fmt.Errorf("failed to generate grant key: %w", err)
-			}
-		}
-	}
-
 	if loadedGrant.grantID == "" {
 		return "", "", nil, fmt.Errorf("grant ID is required")
 	}
-	if len(loadedGrant.decryptedMetadata) > 0 {
-		encryptedMetadata, err := loadedGrant.grantKey.EncryptMetadata(loadedGrant.decryptedMetadata, loadedGrant.grantID)
-		if err != nil {
-			return "", "", nil, fmt.Errorf("failed to encrypt metadata: %w", err)
-		}
-		loadedGrant.grant.EncryptedMetadata = encryptedMetadata
-	}
-
 	tid := uuid.NewV4().String()
 	tok, err := token.New(tokenUsageRefresh, tid, loadedGrant.grantID, loadedGrant.grant.UserID)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	var encryptedGrantKey []byte
-	if loadedGrant.grantKey != nil {
-		encryptedGrantKey, err = loadedGrant.grantKey.WrapForToken(&tok)
-		if err != nil {
-			return "", "", nil, fmt.Errorf("failed to encrypt grant key: %w", err)
-		}
-	}
-
 	storedToken = &storedRefreshToken{
-		GrantID:           loadedGrant.grantID,
-		Token:             tok.Stored(),
-		ValidUntil:        tokenExpiresAt,
-		StorageExpiresAt:  loadedGrant.grant.ExpiresAt, // Keep token around as long as the grant
-		EncryptedGrantKey: encryptedGrantKey,
+		GrantID:          loadedGrant.grantID,
+		Token:            tok.Stored(),
+		ValidUntil:       tokenExpiresAt,
+		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep token around as long as the grant
+
 	}
 	return tok.UserToken(), tid, storedToken, nil
 }

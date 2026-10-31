@@ -64,10 +64,7 @@ type storedAuthCode struct {
 	// StorageExpiresAt is the time at which the code can be deleted from storage.
 	// This is typically after ValidUntil to allow for cleanup.
 	StorageExpiresAt time.Time `json:"storageExpiresAt,omitzero"`
-	// EncryptedGrantKey is the key used to encrypt the grant metadata, encrypted
-	// with this auth code.
-	EncryptedGrantKey []byte `json:"encryptedGrantKey,omitzero"`
-	storageVersion    uint64
+	storageVersion   uint64
 }
 
 // storedRefreshToken represents a refresh token that can be used to obtain new
@@ -84,9 +81,6 @@ type storedRefreshToken struct {
 	// ReplacedByTokenID is the ID of the token that replaced this one during rotation.
 	// Used for tracking rotation chains and enforcing grace period policies.
 	ReplacedByTokenID string `json:"replacedByTokenID,omitzero"`
-	// EncryptedGrantKey is the key used to encrypt the grant metadata, encrypted
-	// with this refresh token.
-	EncryptedGrantKey []byte `json:"encryptedGrantKey,omitzero"`
 	storageVersion    uint64
 }
 
@@ -113,16 +107,6 @@ type storedGrant struct {
 	// package-owned grant record.
 	AdditionalState json.RawMessage `json:"additionalState,omitzero"`
 
-	// Metadata stores unencrypted application-specific data that can be accessed
-	// without a valid token (e.g., grant creation timestamp, grant type).
-	Metadata []byte `json:"metadata,omitzero"`
-	// EncryptedMetadata stores sensitive application data encrypted with the
-	// Grant Key. Only accessible with a valid token from this grant.
-	//
-	// Common use case: storing upstream IDP refresh tokens when this AS acts
-	// as an OAuth2 client to another provider. The upstream refresh token is
-	// encrypted here and can only be decrypted by presenting a valid token.
-	EncryptedMetadata []byte `json:"encryptedMetadata,omitzero"`
 	// ACR is the Authentication Context Class Reference satisfied for this grant.
 	ACR string `json:"acr,omitzero"`
 	// AMR lists the Authentication Methods References for this grant.

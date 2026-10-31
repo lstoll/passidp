@@ -2,6 +2,7 @@ package token
 
 import (
 	"bytes"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,40 @@ func TestTokenRoundTrip(t *testing.T) {
 	stored[0] ^= 0xff
 	if bytes.Equal(stored, original.Stored()) {
 		t.Fatal("Stored returned mutable internal state")
+	}
+}
+
+func TestTokenCompatibilityVector(t *testing.T) {
+	// Generated with the previous implementation using this fixed secret and
+	// binding. The opaque envelope and verifier must remain byte-for-byte stable.
+	var secret [secretSize]byte
+	for i := range secret {
+		secret[i] = byte(i)
+	}
+	usage := Usage{Name: "refresh_token", Prefix: "r"}
+	stored, err := deriveStoredVerifier(secret, usage, "vector-id", "vector-grant", "vector-subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantUserToken = "o2as.r.1.dmVjdG9yLWlk.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	const wantStored = "72b6b4dcd3767abbcc588becc30f985d2a4bf03dd9510f5f61f94f4ac5c86dd5"
+	token := Token{usage: usage, id: "vector-id", secret: secret, stored: stored}
+	if got := token.UserToken(); got != wantUserToken {
+		t.Fatalf("user token = %q, want %q", got, wantUserToken)
+	}
+	wantStoredBytes, err := hex.DecodeString(wantStored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stored[:], wantStoredBytes) {
+		t.Fatalf("stored verifier = %x, want %x", stored, wantStoredBytes)
+	}
+	parsed, err := ParseUserToken(wantUserToken, usage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parsed.Verify(wantStoredBytes, "vector-grant", "vector-subject"); err != nil {
+		t.Fatalf("verify compatibility vector: %v", err)
 	}
 }
 
@@ -121,103 +156,6 @@ func TestParseUserTokenRejectsMalformedInput(t *testing.T) {
 				t.Fatalf("parsed malformed token %q", candidate)
 			}
 		})
-	}
-}
-
-func TestGrantKeyWorkflowAndRotation(t *testing.T) {
-	grantKey, err := GenerateGrantKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	first := mustToken(t, testUsage, "token-1")
-	second := mustToken(t, testUsage, "token-2")
-
-	metadata := []byte("sensitive metadata")
-	ciphertext, err := grantKey.EncryptMetadata(metadata, "grant-id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(ciphertext, metadata) || !bytes.HasPrefix(ciphertext, metadataEnvelopeHeader) {
-		t.Fatalf("unexpected metadata envelope: %x", ciphertext)
-	}
-
-	firstWrapped, err := grantKey.WrapForToken(&first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstParsed, err := ParseUserToken(first.UserToken(), testUsage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstVerified, err := firstParsed.Verify(first.Stored(), "grant-id", "subject")
-	if err != nil {
-		t.Fatal(err)
-	}
-	unwrapped, err := firstVerified.UnwrapGrantKey(firstWrapped)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plaintext, err := unwrapped.DecryptMetadata(ciphertext, "grant-id")
-	if err != nil || !bytes.Equal(plaintext, metadata) {
-		t.Fatalf("metadata round trip: got %q, err %v", plaintext, err)
-	}
-
-	// Rotation keeps the grant key and metadata ciphertext, but wraps the key
-	// under independently derived material for the replacement token.
-	secondWrapped, err := unwrapped.WrapForToken(&second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(firstWrapped, secondWrapped) {
-		t.Fatal("rotation produced an identical wrapped grant key")
-	}
-	if _, err := second.UnwrapGrantKey(firstWrapped); err == nil {
-		t.Fatal("replacement token unwrapped the previous token's grant key")
-	}
-	if _, err := second.UnwrapGrantKey(ciphertext); err == nil {
-		t.Fatal("metadata envelope was accepted as a wrapped grant key")
-	}
-	secondKey, err := second.UnwrapGrantKey(secondWrapped)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plaintext, err = secondKey.DecryptMetadata(ciphertext, "grant-id")
-	if err != nil || !bytes.Equal(plaintext, metadata) {
-		t.Fatalf("rotated metadata round trip: got %q, err %v", plaintext, err)
-	}
-}
-
-func TestAEADBindingsAndTampering(t *testing.T) {
-	key, err := GenerateGrantKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ciphertext, err := key.EncryptMetadata([]byte("plaintext"), "grant-id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tampered := bytes.Clone(ciphertext)
-	tampered[len(tampered)-1] ^= 1
-	if _, err := key.DecryptMetadata(tampered, "grant-id"); err == nil {
-		t.Fatal("accepted tampered ciphertext")
-	}
-	if _, err := key.DecryptMetadata(ciphertext, "other-grant"); err == nil {
-		t.Fatal("accepted ciphertext under a different grant")
-	}
-	wrongVersion := bytes.Clone(ciphertext)
-	wrongVersion[3]++
-	if _, err := key.DecryptMetadata(wrongVersion, "grant-id"); err == nil {
-		t.Fatal("accepted an unknown envelope version")
-	}
-	if _, err := key.DecryptMetadata([]byte("short"), "grant-id"); err == nil {
-		t.Fatal("accepted a truncated envelope")
-	}
-	second, err := GenerateGrantKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := second.DecryptMetadata(ciphertext, "grant-id"); err == nil {
-		t.Fatal("a different grant key decrypted the metadata")
 	}
 }
 

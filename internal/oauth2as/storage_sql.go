@@ -137,10 +137,10 @@ func (s *Storage) scanGrant(ctx context.Context, q sqlQueryer, id string) (store
 		grant   storedGrant
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, "SELECT user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version FROM "+tblGrants+" WHERE id = ?", id).Scan(
+	err := q.QueryRowContext(ctx, "SELECT user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, acr, amr, version FROM "+tblGrants+" WHERE id = ?", id).Scan(
 		&grant.UserID, &grant.ClientID, jsonArray(&grant.GrantedScopes), jsonOf(&grant.Request),
 		s.timeOf(&grant.GrantedAt), s.nullTime(&grant.AuthenticatedAt), s.timeOf(&grant.ExpiresAt),
-		jsonOf(&grant.AdditionalState), nullOf(&grant.Metadata), nullOf(&grant.EncryptedMetadata),
+		jsonOf(&grant.AdditionalState),
 		nullOf(&grant.ACR), jsonArray(&grant.AMR), &version,
 	)
 	if err != nil {
@@ -154,7 +154,7 @@ func (s *Storage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) (st
 		code    storedAuthCode
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, "SELECT grant_id, code, valid_until, delete_after, encrypted_grant_key, version FROM "+tblAuthCodes+" WHERE id = ?", id).Scan(&code.GrantID, &code.Code, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), nullOf(&code.EncryptedGrantKey), &version)
+	err := q.QueryRowContext(ctx, "SELECT grant_id, code, valid_until, delete_after, version FROM "+tblAuthCodes+" WHERE id = ?", id).Scan(&code.GrantID, &code.Code, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), &version)
 	if err != nil {
 		return storedAuthCode{}, 0, err
 	}
@@ -166,7 +166,7 @@ func (s *Storage) scanRefreshToken(ctx context.Context, q sqlQueryer, id string)
 		token   storedRefreshToken
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, "SELECT grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version FROM "+tblRefreshTokens+" WHERE id = ?", id).Scan(&token.GrantID, &token.Token, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), nullOf(&token.ReplacedByTokenID), nullOf(&token.EncryptedGrantKey), &version)
+	err := q.QueryRowContext(ctx, "SELECT grant_id, token, valid_until, delete_after, replaced_by_id, version FROM "+tblRefreshTokens+" WHERE id = ?", id).Scan(&token.GrantID, &token.Token, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), nullOf(&token.ReplacedByTokenID), &version)
 	if err != nil {
 		return storedRefreshToken{}, 0, err
 	}
@@ -350,34 +350,34 @@ func (s *Storage) tableForKind(kind storageKind) (table, idColumn string, err er
 
 func (s *Storage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, metadata, encrypted_metadata, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, request = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, additional_state = ?, metadata = ?, encrypted_metadata = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
+		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, request = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, additional_state = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
 		[]any{
 			value.ID, value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), jsonOf(&value.Request), s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt),
-			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState), nullOf(&value.Metadata), nullOf(&value.EncryptedMetadata),
+			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState),
 			nullOf(&value.ACR), jsonArray(&value.AMR), version,
 		},
 		[]any{
 			value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), jsonOf(&value.Request), s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt),
-			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState), nullOf(&value.Metadata), nullOf(&value.EncryptedMetadata),
+			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState),
 			nullOf(&value.ACR), jsonArray(&value.AMR), version, value.ID,
 		})
 }
 
 func (s *Storage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblAuthCodes+" (id, grant_id, code, valid_until, delete_after, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblAuthCodes+" SET grant_id = ?, code = ?, valid_until = ?, delete_after = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.EncryptedGrantKey), version},
-		[]any{value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.EncryptedGrantKey), version, value.ID})
+		"INSERT INTO "+tblAuthCodes+" (id, grant_id, code, valid_until, delete_after, version) VALUES (?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblAuthCodes+" SET grant_id = ?, code = ?, valid_until = ?, delete_after = ?, version = ? WHERE id = ?",
+		[]any{value.ID, value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version},
+		[]any{value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version, value.ID})
 }
 
 func (s *Storage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, token, valid_until, delete_after, replaced_by_id, encrypted_grant_key, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, token = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, encrypted_grant_key = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), nullOf(&value.EncryptedGrantKey), version},
-		[]any{value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), nullOf(&value.EncryptedGrantKey), version, value.ID})
+		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, token, valid_until, delete_after, replaced_by_id, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, token = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, version = ? WHERE id = ?",
+		[]any{value.ID, value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), version},
+		[]any{value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), version, value.ID})
 }
 
 func (s *Storage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
@@ -616,6 +616,7 @@ func (s *Storage) migrateOnce(ctx context.Context) error {
 }
 
 func sqlMigrations() []sqlMigration {
+	// Keep the original schema, including unused metadata columns, compatible with existing databases.
 	// SQLite has no UUID or timestamptz. TEXT IDs store canonical UUID
 	// strings; TEXT timestamps use sqliteTimeFormat so they sort in time order.
 	const blob, js, id, ts = "BLOB", "JSON", "TEXT", "TEXT"

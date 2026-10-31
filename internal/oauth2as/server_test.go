@@ -697,7 +697,6 @@ func TestUserinfoGrantContext(t *testing.T) {
 		GrantedScopes: []string{"openid", "profile"},
 		GrantedAt:     time.Now(),
 		ExpiresAt:     time.Now().Add(time.Hour),
-		Metadata:      []byte(`{"federation":"abc"}`),
 		ACR:           "urn:mace:incommon:iap:silver",
 		AMR:           []string{"pwd"},
 	}
@@ -742,9 +741,6 @@ func TestUserinfoGrantContext(t *testing.T) {
 	if gotReq.GrantID != grantID {
 		t.Errorf("GrantID: want %q, got %q", grantID, gotReq.GrantID)
 	}
-	if string(gotReq.Metadata) != `{"federation":"abc"}` {
-		t.Errorf("Metadata: got %q", gotReq.Metadata)
-	}
 	if !slices.Equal(gotReq.GrantedScopes, []string{"openid", "profile"}) {
 		t.Errorf("GrantedScopes: got %v", gotReq.GrantedScopes)
 	}
@@ -755,14 +751,13 @@ func TestUserinfoGrantContext(t *testing.T) {
 		t.Errorf("AMR: got %v", gotReq.AMR)
 	}
 
-	gotReq.Metadata[0] = 'X'
 	gotReq.GrantedScopes[0] = "changed"
 	gotReq.AMR[0] = "changed"
 	stored, err := s.getGrant(t.Context(), grantID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(stored.Metadata) != `{"federation":"abc"}` || !slices.Equal(stored.GrantedScopes, []string{"openid", "profile"}) || !slices.Equal(stored.AMR, []string{"pwd"}) {
+	if !slices.Equal(stored.GrantedScopes, []string{"openid", "profile"}) || !slices.Equal(stored.AMR, []string{"pwd"}) {
 		t.Fatalf("userinfo handler mutated stored grant: %#v", stored)
 	}
 }

@@ -3,6 +3,7 @@ package oauth2as
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func testStorage(t *testing.T, factory func(t *testing.T) *Storage) {
 		expires := time.Now().Add(time.Hour).Round(0)
 		if err := store.commit(ctx, storageCommit{
 			Checks: []storageCheck{{Kind: storageKindGrant, ID: "g1"}},
-			Grants: []storedGrant{{ID: "g1", UserID: "user", ClientID: "client", Metadata: []byte("opaque"), ExpiresAt: expires}},
+			Grants: []storedGrant{{ID: "g1", UserID: "user", ClientID: "client", GrantedScopes: []string{"openid"}, ExpiresAt: expires}},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -32,15 +33,15 @@ func testStorage(t *testing.T, factory func(t *testing.T) *Storage) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.storageVersion != 1 || got.UserID != "user" || string(got.Metadata) != "opaque" || !got.ExpiresAt.Equal(expires) {
+		if got.storageVersion != 1 || got.UserID != "user" || !slices.Equal(got.GrantedScopes, []string{"openid"}) || !got.ExpiresAt.Equal(expires) {
 			t.Fatalf("unexpected grant: %#v", got)
 		}
-		got.Metadata[0] = 'X'
+		got.GrantedScopes[0] = "changed"
 		again, err := store.getGrant(ctx, "g1")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(again.Metadata) != "opaque" {
+		if !slices.Equal(again.GrantedScopes, []string{"openid"}) {
 			t.Fatal("Get returned storage-owned memory")
 		}
 	})

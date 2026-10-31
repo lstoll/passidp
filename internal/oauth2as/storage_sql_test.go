@@ -12,11 +12,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"uuid"
 
 	"lds.li/oauth2ext/dpop"
 	"lds.li/oauth2ext/jwt"
@@ -34,13 +35,17 @@ func (clientSource) Client(_ context.Context, clientID string) (*Client, error) 
 	}, nil
 }
 
-// newSQLiteDB returns a fresh SQLite database in a per-test temp directory.
+// newSQLiteDB returns an isolated shared in-memory database. The DSN pragmas
+// are applied to every connection opened by database/sql.
 func newSQLiteDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "db"))
+	dsn := "file:" + uuid.NewV4().String() + "?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
+	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(4)
 	t.Cleanup(func() { db.Close() })
 	return db
 }

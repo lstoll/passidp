@@ -2,8 +2,8 @@ package oauth2as
 
 import "testing"
 
-// newTestStorage returns migrated SQLite storage backed by a database file in
-// a per-test temp directory.
+// newTestStorage returns migrated SQLite storage backed by an isolated,
+// shared in-memory database.
 func newTestStorage(t *testing.T) *Storage {
 	t.Helper()
 	_, store := newMigratedSQLStorage(t)

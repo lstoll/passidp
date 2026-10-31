@@ -21,19 +21,26 @@ import (
 )
 
 func TestStaticClients_Client(t *testing.T) {
-	sc := &StaticClients{
-		Clients: []config.Client{
-			{
-				ID:           "public-client",
-				RedirectURLs: []string{"http://127.0.0.1/callback"},
-				Public:       true,
-			},
-			{
-				ID:           "confidential-client",
-				RedirectURLs: []string{"https://example.com/callback"},
-				Secrets:      []string{"secret"},
-			},
+	sc, err := NewStaticClients([]config.Client{
+		{
+			ID:           "public-client",
+			RedirectURLs: []string{"http://127.0.0.1/callback"},
+			Public:       true,
 		},
+		{
+			ID:                  "confidential-client",
+			RedirectURLs:        []string{"https://example.com/callback"},
+			Secrets:             []string{"secret"},
+			ClaimsPolicy:        "claims policy",
+			AuthorizationPolicy: "authorization policy",
+			GrantValidity:       config.JSONDuration(2 * time.Hour),
+			TokenValidity:       config.JSONDuration(3 * time.Hour),
+			RefreshValidity:     config.JSONDuration(4 * time.Hour),
+			DPoPRefreshValidity: config.JSONDuration(5 * time.Hour),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	pub, err := sc.Client(context.Background(), "public-client")
@@ -53,6 +60,24 @@ func TestStaticClients_Client(t *testing.T) {
 	}
 	if conf.Public || len(conf.Secrets) != 1 || conf.Secrets[0] != "secret" || conf.PrivateKeyJWT != nil {
 		t.Fatalf("unexpected confidential client: %+v", conf)
+	}
+	if conf.ClaimsPolicy != "claims policy" || conf.AuthorizationPolicy != "authorization policy" || conf.GrantValidity != 2*time.Hour || conf.TokenValidity != 3*time.Hour || conf.RefreshValidity != 4*time.Hour || conf.DPoPRefreshValidity != 5*time.Hour {
+		t.Fatalf("static policy or duration fields not mapped: %+v", conf)
+	}
+	conf.RedirectURIs[0] = "https://mutated.example/callback"
+	conf.Secrets[0] = "mutated"
+	conf.ClaimsPolicy = "mutated"
+	conf.AuthorizationPolicy = "mutated"
+	conf.GrantValidity = 0
+	conf.TokenValidity = 0
+	conf.RefreshValidity = 0
+	conf.DPoPRefreshValidity = 0
+	confAgain, err := sc.Client(context.Background(), "confidential-client")
+	if err != nil || confAgain == nil {
+		t.Fatalf("Client(confidential-client) after mutation = %v, %v", confAgain, err)
+	}
+	if confAgain.RedirectURIs[0] != "https://example.com/callback" || confAgain.Secrets[0] != "secret" || confAgain.ClaimsPolicy != "claims policy" || confAgain.AuthorizationPolicy != "authorization policy" || confAgain.GrantValidity != 2*time.Hour || confAgain.TokenValidity != 3*time.Hour || confAgain.RefreshValidity != 4*time.Hour || confAgain.DPoPRefreshValidity != 5*time.Hour {
+		t.Fatalf("returned client mutation escaped into indexed client: %+v", confAgain)
 	}
 
 	missing, err := sc.Client(context.Background(), "missing")
@@ -94,12 +119,16 @@ func TestNewStaticClientsPrivateKeyJWT(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			jwks, err := sc.verificationKeys["jwt-client"].JWKS()
+			jwks, err := client.PrivateKeyJWT.JWKS()
 			if err != nil || !strings.Contains(string(jwks), `"kid":"`+wantKey.KeyID+`"`) {
 				t.Fatalf("verification JWKS = %s, %v; expected kid %q", jwks, err, wantKey.KeyID)
 			}
 			if len(client.Secrets) != 0 || client.Public {
 				t.Fatalf("Client() = %+v; want no secrets and not public", client)
+			}
+			again, err := sc.Client(context.Background(), "jwt-client")
+			if err != nil || again == nil || again.PrivateKeyJWT != client.PrivateKeyJWT {
+				t.Fatalf("client key handle was not preserved across lookups: %v, %v", again, err)
 			}
 		})
 	}
@@ -140,11 +169,11 @@ func TestRemoteJWKSLoadsInBackground(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStaticClients with unreachable JWKS: %v", err)
 	}
-	keys := sc.verificationKeys["remote"]
-	if keys == nil {
-		t.Fatal("remote client has no key set")
+	client, err := sc.Client(ctx, "remote")
+	if err != nil || client == nil || client.PrivateKeyJWT == nil {
+		t.Fatalf("Client(remote) = %v, %v", client, err)
 	}
-	if hasKey(t, keys, "client-key") {
+	if hasKey(t, client.PrivateKeyJWT, "client-key") {
 		t.Fatal("keys present before the JWKS was fetched")
 	}
 
@@ -175,7 +204,7 @@ func TestRemoteJWKSLoadsInBackground(t *testing.T) {
 	stop := runLoader()
 	time.Sleep(50 * time.Millisecond)
 	unavailable.Store(false)
-	waitFor(t, func() bool { return hasKey(t, keys, "client-key") })
+	waitFor(t, func() bool { return hasKey(t, client.PrivateKeyJWT, "client-key") })
 	stop()
 
 	// If the host goes down again, a new load attempt keeps the last good keys.
@@ -183,7 +212,7 @@ func TestRemoteJWKSLoadsInBackground(t *testing.T) {
 	stop = runLoader()
 	time.Sleep(50 * time.Millisecond)
 	stop()
-	if !hasKey(t, keys, "client-key") {
+	if !hasKey(t, client.PrivateKeyJWT, "client-key") {
 		t.Fatal("failed load discarded the last good keys")
 	}
 }
@@ -284,7 +313,10 @@ func TestConfigValidatePublicSkipPKCE(t *testing.T) {
 }
 
 func TestStaticClientsAcceptRS256(t *testing.T) {
-	sc := &StaticClients{Clients: []config.Client{{ID: "rsa-client", UseRS256: true}}}
+	sc, err := NewStaticClients([]config.Client{{ID: "rsa-client", UseRS256: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	c, err := sc.Client(context.Background(), "rsa-client")
 	if err != nil || c == nil || c.IDTokenSigningAlgorithm != jwt.RS256 {
 		t.Fatalf("Client() = %+v, %v; want RS256 client", c, err)

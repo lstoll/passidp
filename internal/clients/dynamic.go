@@ -22,62 +22,12 @@ import (
 
 var _ oauth2as.ClientSource = (*DynamicClients)(nil)
 
-// DynamicClient represents an retrieved dynamic client for the oidcsvr handler
-// to use. It is mostly a no-op wrapper, as oidcsvr handler doesn't depend on
-// any of the client details.
-type DynamicClient struct{}
-
-func (d *DynamicClient) ClaimsPolicy() string {
-	// dynamic clients can't set claims policies
-	return ""
-}
-
-func (d *DynamicClient) AuthorizationPolicy() string {
-	// dynamic clients can't set authorization policies
-	return ""
-}
-
-func (d *DynamicClient) GrantValidity() *time.Duration {
-	return nil
-}
-
-// AccessIDTokenValidity returns the validity time for access/ID tokens. If
-// nil, the default validity time will be used.
-func (d *DynamicClient) AccessIDTokenValidity() *time.Duration {
-	// dynamic clients can't set their own validity time
-	return nil
-}
-
-func (d *DynamicClient) RefreshValidity() *time.Duration {
-	return nil
-}
-
-func (d *DynamicClient) DPoPRefreshValidity() *time.Duration {
-	return nil
-}
-
 type DynamicClients struct {
 	DB *storage.DynamicClientStore
 }
 
 func (d *DynamicClients) AddHandlers(r *web.Server) {
 	r.Handle("POST /registerClient", http.HandlerFunc(d.registerClient), auth.SkipAuthn)
-}
-
-// GetClient implements the ClientSource interface
-func (d *DynamicClients) GetClient(clientID string) (*DynamicClient, bool) {
-	// Only handle dynamic client IDs (prefixed with "dc.")
-	if !strings.HasPrefix(clientID, "dc.") {
-		return nil, false
-	}
-
-	ctx := context.Background()
-	_, err := d.DB.GetDynamicClient(ctx, clientID)
-	if err != nil {
-		return nil, false
-	}
-
-	return &DynamicClient{}, true
 }
 
 // GetClientMetadata returns the parsed client registration metadata for a given client ID

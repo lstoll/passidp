@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"lds.li/oauth2ext/jwt"
 )
@@ -35,6 +36,19 @@ type Client struct {
 	SkipPKCE bool
 	// IDTokenSigningAlgorithm overrides the server default when set.
 	IDTokenSigningAlgorithm jwt.Algorithm
+
+	// ClaimsPolicy modifies claims issued in ID tokens.
+	ClaimsPolicy string
+	// AuthorizationPolicy determines whether a user may authorize this client.
+	AuthorizationPolicy string
+	// GrantValidity overrides the default grant validity when nonzero.
+	GrantValidity time.Duration
+	// TokenValidity overrides the default access and ID token validity when nonzero.
+	TokenValidity time.Duration
+	// RefreshValidity overrides the default refresh token validity when nonzero.
+	RefreshValidity time.Duration
+	// DPoPRefreshValidity overrides the default DPoP-bound refresh token validity when nonzero.
+	DPoPRefreshValidity time.Duration
 }
 
 // validate checks that the client's configuration is internally consistent.

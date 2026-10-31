@@ -279,10 +279,9 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	auth.AddHandlers(websvr)
 
 	oidchHandlers := &oidcsvr.Handlers{
-		Issuer:  issuerURL.String(),
-		Clients: clients,
-		Config:  cfg,
-		Policy:  pol,
+		Issuer: issuerURL.String(),
+		Config: cfg,
+		Policy: pol,
 	}
 
 	dpopVerifier := &dpop.Verifier{

@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
-	"time"
 
 	"lds.li/oauth2ext/jwt"
 	"lds.li/passidp/internal/config"
 	"lds.li/passidp/internal/oauth2as"
-	"lds.li/passidp/internal/oidcsvr"
 )
 
 var _ oauth2as.ClientSource = &StaticClients{}
@@ -21,19 +19,17 @@ var _ oauth2as.ClientSource = &StaticClients{}
 // StaticClients implements the oauth2as.ClientSource against a static list of clients.
 // The type is tagged, to enable loading from JSON/YAML.
 type StaticClients struct {
-	// Clients is the list of clients
-	Clients          []config.Client `json:"clients"`
-	verificationKeys map[string]*jwt.VerificationKeySet
-	remoteJWKS       []*RemoteJWKS
+	remoteJWKS []*RemoteJWKS
+	index      map[string]*oauth2as.Client
 }
 
 // NewStaticClients prepares static clients. It does not fetch remote JWKS
 // documents; run each of [StaticClients.RemoteJWKS] to load and refresh them.
 func NewStaticClients(configured []config.Client) (*StaticClients, error) {
 	clients := &StaticClients{
-		Clients:          configured,
-		verificationKeys: make(map[string]*jwt.VerificationKeySet),
+		index: make(map[string]*oauth2as.Client, len(configured)),
 	}
+	verificationKeys := make(map[string]*jwt.VerificationKeySet)
 	clientIDs := make(map[string]struct{}, len(configured))
 	for _, cl := range configured {
 		if cl.ID == "" {
@@ -75,7 +71,7 @@ func NewStaticClients(configured []config.Client) (*StaticClients, error) {
 			if err != nil {
 				return nil, fmt.Errorf("client %s: invalid client JWT keys: %w", cl.ID, err)
 			}
-			clients.verificationKeys[cl.ID] = set
+			verificationKeys[cl.ID] = set
 		}
 		if cl.JWKSURL != "" {
 			if u, err := url.Parse(cl.JWKSURL); err != nil || u.Scheme != "https" || u.Host == "" {
@@ -85,9 +81,31 @@ func NewStaticClients(configured []config.Client) (*StaticClients, error) {
 			if err != nil {
 				return nil, fmt.Errorf("client %s: create verification key set: %w", cl.ID, err)
 			}
-			clients.verificationKeys[cl.ID] = set
+			verificationKeys[cl.ID] = set
 			clients.remoteJWKS = append(clients.remoteJWKS, &RemoteJWKS{ClientID: cl.ID, URL: cl.JWKSURL, keys: set})
 		}
+		client := &oauth2as.Client{
+			ID:                      cl.ID,
+			RedirectURIs:            slices.Clone(cl.RedirectURLs),
+			Public:                  cl.Public,
+			SkipPKCE:                cl.SkipPKCE,
+			IDTokenSigningAlgorithm: jwt.ES256,
+			ClaimsPolicy:            cl.ClaimsPolicy,
+			AuthorizationPolicy:     cl.AuthorizationPolicy,
+			GrantValidity:           cl.GrantValidity.Duration(),
+			TokenValidity:           cl.TokenValidity.Duration(),
+			RefreshValidity:         cl.RefreshValidity.Duration(),
+			DPoPRefreshValidity:     cl.DPoPRefreshValidity.Duration(),
+		}
+		if cl.UseRS256 {
+			client.IDTokenSigningAlgorithm = jwt.RS256
+		}
+		if keys := verificationKeys[cl.ID]; keys != nil {
+			client.PrivateKeyJWT = keys
+		} else {
+			client.Secrets = slices.Clone(cl.Secrets)
+		}
+		clients.index[cl.ID] = client
 	}
 	return clients, nil
 }
@@ -98,79 +116,14 @@ func (c *StaticClients) RemoteJWKS() []*RemoteJWKS {
 	return slices.Clone(c.remoteJWKS)
 }
 
-type StaticClient struct {
-	configClient config.Client
-}
-
-func (c *StaticClient) ClaimsPolicy() string {
-	return c.configClient.ClaimsPolicy
-}
-
-func (c *StaticClient) AuthorizationPolicy() string {
-	return c.configClient.AuthorizationPolicy
-}
-
-func (c *StaticClient) GrantValidity() *time.Duration {
-	if c.configClient.GrantValidity != 0 {
-		return new(c.configClient.GrantValidity.Duration())
-	}
-	return nil
-}
-
-func (c *StaticClient) AccessIDTokenValidity() *time.Duration {
-	if c.configClient.TokenValidity != 0 {
-		return new(c.configClient.TokenValidity.Duration())
-	}
-	return nil
-}
-
-func (c *StaticClient) RefreshValidity() *time.Duration {
-	if c.configClient.RefreshValidity != 0 {
-		return new(c.configClient.RefreshValidity.Duration())
-	}
-	return nil
-}
-
-func (c *StaticClient) DPoPRefreshValidity() *time.Duration {
-	if c.configClient.DPoPRefreshValidity != 0 {
-		return new(c.configClient.DPoPRefreshValidity.Duration())
-	}
-	return nil
-}
-
-// GetClient returns the client with the given ID, or nil if it doesn't exist.
-func (c *StaticClients) GetClient(clientID string) (oidcsvr.Client, bool) {
-	for _, cl := range c.Clients {
-		if cl.ID == clientID {
-			return &StaticClient{configClient: cl}, true
-		}
-	}
-	return nil, false
-}
-
 // Client implements oauth2as.ClientSource.
 func (c *StaticClients) Client(_ context.Context, clientID string) (*oauth2as.Client, error) {
-	for _, cl := range c.Clients {
-		if cl.ID != clientID {
-			continue
-		}
-		client := &oauth2as.Client{
-			ID:                      cl.ID,
-			RedirectURIs:            cl.RedirectURLs,
-			Public:                  cl.Public,
-			SkipPKCE:                cl.SkipPKCE,
-			IDTokenSigningAlgorithm: jwt.ES256,
-		}
-		if cl.UseRS256 {
-			client.IDTokenSigningAlgorithm = jwt.RS256
-		}
-		if keys := c.verificationKeys[cl.ID]; keys != nil {
-			// private_key_jwt clients never authenticate with secrets.
-			client.PrivateKeyJWT = keys
-		} else {
-			client.Secrets = cl.Secrets
-		}
-		return client, nil
+	client := c.index[clientID]
+	if client == nil {
+		return nil, nil
 	}
-	return nil, nil
+	copy := *client
+	copy.RedirectURIs = slices.Clone(client.RedirectURIs)
+	copy.Secrets = slices.Clone(client.Secrets)
+	return &copy, nil
 }

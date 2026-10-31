@@ -51,6 +51,8 @@ type AccessTokenClaims struct {
 // TokenRequest encapsulates the information from the initial request to the token
 // endpoint. This is passed to the handler, to generate an appropriate response.
 type TokenRequest struct {
+	// Client is the authenticated client snapshot for this request. It is never persisted.
+	Client *Client
 	// GrantID is the ID of the grant that was used to obtain the token.
 	GrantID string
 	// UserID is the user ID that was granted access.
@@ -239,6 +241,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 	}
 
 	tr := &TokenRequest{
+		Client:            client,
 		GrantID:           loadedGrant.grantID,
 		UserID:            loadedGrant.grant.UserID,
 		ClientID:          loadedGrant.grant.ClientID,
@@ -355,6 +358,7 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 	isDPoPBound := storedThumbprint != ""
 
 	tr := &TokenRequest{
+		Client:            client,
 		GrantID:           loadedGrant.grantID,
 		UserID:            loadedGrant.grant.UserID,
 		ClientID:          loadedGrant.grant.ClientID,

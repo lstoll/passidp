@@ -12,17 +12,18 @@ import (
 	"lds.li/passidp/internal/config"
 )
 
-func TestMultiClients_GetClient(t *testing.T) {
+func TestMultiClientsStaticClientPrecedence(t *testing.T) {
 	// Test static client takes precedence
-	staticClients := &StaticClients{
-		Clients: []config.Client{
-			{
-				ID:           "static-client",
-				RedirectURLs: []string{"https://example.com/callback"},
-				Secrets:      []string{"secret1"},
-				Public:       false,
-			},
+	staticClients, err := NewStaticClients([]config.Client{
+		{
+			ID:           "static-client",
+			RedirectURLs: []string{"https://example.com/callback"},
+			Secrets:      []string{"secret1"},
+			Public:       false,
 		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	db := setupTestDB(t)
@@ -37,27 +38,24 @@ func TestMultiClients_GetClient(t *testing.T) {
 	multi := NewMultiClients(staticClients, dynamicClients)
 
 	// Should get static client (takes precedence)
-	client, found := multi.GetClient("static-client")
-	if !found {
-		t.Error("expected to find client")
+	client, err := multi.Client(context.Background(), "static-client")
+	if err != nil || client == nil {
+		t.Fatalf("Client(static-client) = %v, %v", client, err)
 	}
-	if client.(*StaticClient).configClient.ID != "static-client" {
-		t.Errorf("expected static client, got %s", client.(*StaticClient).configClient.ID)
-	}
-	if len(client.(*StaticClient).configClient.RedirectURLs) != 1 || client.(*StaticClient).configClient.RedirectURLs[0] != "https://example.com/callback" {
-		t.Errorf("expected static client redirect URLs, got %v", client.(*StaticClient).configClient.RedirectURLs)
+	if len(client.RedirectURIs) != 1 || client.RedirectURIs[0] != "https://example.com/callback" {
+		t.Errorf("expected static client redirect URIs, got %v", client.RedirectURIs)
 	}
 
 	// Test dynamic client when static doesn't exist
-	_, found = multi.GetClient("dc.dynamic-only")
-	if found {
-		t.Error("expected not to find dynamic client with dc. prefix")
+	client, err = multi.Client(context.Background(), "dc.dynamic-only")
+	if err != nil || client != nil {
+		t.Fatalf("Client(dc.dynamic-only) = %v, %v; want nil, nil", client, err)
 	}
 
 	// Test non-existent client
-	_, found = multi.GetClient("nonexistent")
-	if found {
-		t.Error("expected not to find nonexistent client")
+	client, err = multi.Client(context.Background(), "nonexistent")
+	if err != nil || client != nil {
+		t.Fatalf("Client(nonexistent) = %v, %v; want nil, nil", client, err)
 	}
 }
 
@@ -101,14 +99,15 @@ func TestMultiClientsStaticJWTDoesNotFallBackToDynamicSecret(t *testing.T) {
 }
 
 func TestMultiClients_Client(t *testing.T) {
-	staticClients := &StaticClients{
-		Clients: []config.Client{
-			{
-				ID:           "static-client",
-				RedirectURLs: []string{"https://static.com/callback"},
-				Secrets:      []string{"secret1"},
-			},
+	staticClients, err := NewStaticClients([]config.Client{
+		{
+			ID:           "static-client",
+			RedirectURLs: []string{"https://static.com/callback"},
+			Secrets:      []string{"secret1"},
 		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	db := setupTestDB(t)

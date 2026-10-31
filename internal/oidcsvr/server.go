@@ -25,7 +25,7 @@ type Server struct {
 	Auth      *auth.Authenticator
 	OAuth2AS  *oauth2as.Server
 	Discovery *discovery.OIDCConfigurationHandler
-	Clients   ClientSource
+	Clients   oauth2as.ClientSource
 	Config    *config.Config
 	Policy    *policy.PolicyEvaluator
 }
@@ -99,8 +99,11 @@ func (s *Server) HandleAuthorizationRequestReturn(ctx context.Context, w web.Res
 
 func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, userID uuid.UUID) (returnTo string, _ error) {
 	// Get client configuration
-	client, found := s.Clients.GetClient(request.ClientID)
-	if !found {
+	client, err := s.Clients.Client(ctx, request.ClientID)
+	if err != nil {
+		return "", fmt.Errorf("get client: %w", err)
+	}
+	if client == nil {
 		return "", httperror.BadRequestErrf("client %s not found", request.ClientID)
 	}
 
@@ -110,8 +113,8 @@ func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest,
 	}
 
 	// Check authorization policy if specified
-	if s.Policy != nil && client.AuthorizationPolicy() != "" {
-		authorized, err := s.Policy.EvaluateAuthorization(client.AuthorizationPolicy(), user)
+	if s.Policy != nil && client.AuthorizationPolicy != "" {
+		authorized, err := s.Policy.EvaluateAuthorization(client.AuthorizationPolicy, user)
 		if err != nil {
 			return "", fmt.Errorf("evaluate authorization policy: %w", err)
 		}
@@ -135,8 +138,8 @@ func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest,
 	if authTime, ok := auth.AuthTimeFromContext(ctx); ok {
 		grant.AuthenticatedAt = authTime
 	}
-	if client.GrantValidity() != nil {
-		grant.ExpiresAt = time.Now().Add(*client.GrantValidity())
+	if client.GrantValidity != 0 {
+		grant.ExpiresAt = time.Now().Add(client.GrantValidity)
 	}
 
 	slog.InfoContext(ctx, "granting auth", "client-id", request.ClientID, "user-id", userID.String(), "scopes", request.Scopes, "grant-expires-at", grant.ExpiresAt)

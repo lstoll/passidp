@@ -14,27 +14,21 @@ import (
 	"lds.li/oauth2ext/oidcclientreg"
 )
 
-func TestDynamicClients_GetClient(t *testing.T) {
+func TestDynamicClients_ClientMissing(t *testing.T) {
 	db := setupTestDB(t)
 
 	dc := &DynamicClients{DB: db}
 
 	// Test with non-dynamic client ID
-	client, found := dc.GetClient("static-client")
-	if found {
-		t.Error("expected static client to not be found")
-	}
-	if client != nil {
-		t.Error("expected static client to be nil")
+	client, err := dc.Client(context.Background(), "static-client")
+	if err != nil || client != nil {
+		t.Fatalf("Client(static-client) = %v, %v; want nil, nil", client, err)
 	}
 
 	// Test with dynamic client ID that doesn't exist
-	client, found = dc.GetClient("dc.nonexistent")
-	if found {
-		t.Error("expected nonexistent dynamic client to not be found")
-	}
-	if client != nil {
-		t.Error("expected nonexistent dynamic client to be nil")
+	client, err = dc.Client(context.Background(), "dc.nonexistent")
+	if err != nil || client != nil {
+		t.Fatalf("Client(dc.nonexistent) = %v, %v; want nil, nil", client, err)
 	}
 }
 

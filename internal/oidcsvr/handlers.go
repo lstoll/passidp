@@ -14,40 +14,18 @@ import (
 	"lds.li/passidp/internal/policy"
 )
 
-// Client represents the client information that is used for our custom token
-// handlers.
-type Client interface {
-	// ClaimsPolicy returns the CEL expression for modifying claims.
-	ClaimsPolicy() string
-	// AuthorizationPolicy returns the CEL expression for determining if a user
-	// is authorized.
-	AuthorizationPolicy() string
-	// GrantValidity returns the validity time for grants.
-	GrantValidity() *time.Duration
-	// AccessIDTokenValidity returns the validity time for access/ID tokens. If
-	// nil, the default validity time will be used.
-	AccessIDTokenValidity() *time.Duration
-	// RefreshValidity returns the validity time for refresh tokens.
-	RefreshValidity() *time.Duration
-	// DPoPRefreshValidity returns the validity time for refresh tokens when DPoP
-	// is used.
-	DPoPRefreshValidity() *time.Duration
-}
-
-// ClientSource defines the interface for retrieving client information
-type ClientSource interface {
-	GetClient(clientID string) (Client, bool)
-}
-
 type Handlers struct {
-	Issuer  string
-	Config  *config.Config
-	Clients ClientSource
-	Policy  *policy.PolicyEvaluator
+	Issuer string
+	Config *config.Config
+	Policy *policy.PolicyEvaluator
 }
 
 func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest) (_ *oauth2as.TokenResponse, retErr error) {
 	slog.Info("token handler", "clientID", req.ClientID, "scopes", req.GrantedScopes)
+	cl := req.Client
+	if cl == nil {
+		return nil, fmt.Errorf("authenticated client %s missing from token request", req.ClientID)
+	}
 
 	userUUID, err := uuid.Parse(req.UserID)
 	if err != nil {
@@ -59,16 +37,11 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 
-	cl, ok := h.Clients.GetClient(req.ClientID)
-	if !ok {
-		return nil, fmt.Errorf("client %s not found", req.ClientID)
-	}
-
 	idClaims := defaultIDTokenClaims(user)
 
-	if h.Policy != nil && cl.ClaimsPolicy() != "" {
+	if h.Policy != nil && cl.ClaimsPolicy != "" {
 		var err error
-		idClaims, err = h.Policy.EvaluateClaims(cl.ClaimsPolicy(), idClaims, user)
+		idClaims, err = h.Policy.EvaluateClaims(cl.ClaimsPolicy, idClaims, user)
 		if err != nil {
 			return nil, fmt.Errorf("evaluate claims policy: %w", err)
 		}
@@ -82,14 +55,14 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 	var refreshValidity time.Duration
 
 	if req.DPoPBound {
-		if v := cl.DPoPRefreshValidity(); v != nil {
-			refreshValidity = *v
+		if cl.DPoPRefreshValidity != 0 {
+			refreshValidity = cl.DPoPRefreshValidity
 		} else {
 			refreshValidity = h.Config.DPoPRefreshValidity.Duration()
 		}
 	} else {
-		if v := cl.RefreshValidity(); v != nil {
-			refreshValidity = *v
+		if cl.RefreshValidity != 0 {
+			refreshValidity = cl.RefreshValidity
 		}
 	}
 
@@ -99,8 +72,8 @@ func (h *Handlers) TokenHandler(ctx context.Context, req *oauth2as.TokenRequest)
 
 	// Determine access/ID token validity
 	var tokenValidity time.Duration
-	if v := cl.AccessIDTokenValidity(); v != nil {
-		tokenValidity = *v
+	if cl.TokenValidity != 0 {
+		tokenValidity = cl.TokenValidity
 	}
 
 	if tokenValidity > 0 {

@@ -1,7 +1,6 @@
 package oauth2as
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -12,8 +11,7 @@ import (
 	"time"
 )
 
-// Fixed table and index names. These are persisted in existing databases and
-// must not change.
+// OAuth tables share a database with other PassIDP state.
 const (
 	tblSchemaMigrations = "oauth2as_schema_migrations"
 	tblGrants           = "oauth2as_grants"
@@ -63,16 +61,6 @@ func (s *Storage) conn(ctx context.Context) (*sql.Conn, error) {
 }
 
 func timeFromMicros(value int64) time.Time { return time.UnixMicro(value).UTC() }
-
-func truncateTime(t time.Time) time.Time {
-	if t.IsZero() {
-		return t
-	}
-	return t.UTC().Truncate(time.Microsecond)
-}
-
-// sqliteTimeFormat is fixed-width UTC so TEXT timestamps sort chronologically.
-const sqliteTimeFormat = "2006-01-02T15:04:05.000000Z"
 
 func (s *Storage) getGrant(ctx context.Context, id string) (*storedGrant, error) {
 	conn, err := s.conn(ctx)
@@ -137,11 +125,11 @@ func (s *Storage) scanGrant(ctx context.Context, q sqlQueryer, id string) (store
 		grant   storedGrant
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, "SELECT user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, acr, amr, version FROM "+tblGrants+" WHERE id = ?", id).Scan(
-		&grant.UserID, &grant.ClientID, jsonArray(&grant.GrantedScopes), jsonOf(&grant.Request),
+	err := q.QueryRowContext(ctx, "SELECT user_id, client_id, granted_scopes, redirect_uri, code_challenge, nonce, max_age, granted_at, authenticated_at, expires_at, dpop_thumbprint, acr, amr, version FROM "+tblGrants+" WHERE id = ?", id).Scan(
+		&grant.UserID, &grant.ClientID, jsonArray(&grant.GrantedScopes), &grant.RedirectURI, &grant.CodeChallenge, &grant.Nonce, &grant.MaxAge,
 		s.timeOf(&grant.GrantedAt), s.nullTime(&grant.AuthenticatedAt), s.timeOf(&grant.ExpiresAt),
-		jsonOf(&grant.AdditionalState),
-		nullOf(&grant.ACR), jsonArray(&grant.AMR), &version,
+		&grant.DPoPThumbprint,
+		&grant.ACR, jsonArray(&grant.AMR), &version,
 	)
 	if err != nil {
 		return storedGrant{}, 0, err
@@ -154,7 +142,7 @@ func (s *Storage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) (st
 		code    storedAuthCode
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, "SELECT grant_id, code, valid_until, delete_after, version FROM "+tblAuthCodes+" WHERE id = ?", id).Scan(&code.GrantID, &code.Code, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), &version)
+	err := q.QueryRowContext(ctx, "SELECT grant_id, valid_until, delete_after, version FROM "+tblAuthCodes+" WHERE id = ?", id).Scan(&code.GrantID, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), &version)
 	if err != nil {
 		return storedAuthCode{}, 0, err
 	}
@@ -166,7 +154,7 @@ func (s *Storage) scanRefreshToken(ctx context.Context, q sqlQueryer, id string)
 		token   storedRefreshToken
 		version uint64
 	)
-	err := q.QueryRowContext(ctx, "SELECT grant_id, token, valid_until, delete_after, replaced_by_id, version FROM "+tblRefreshTokens+" WHERE id = ?", id).Scan(&token.GrantID, &token.Token, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), nullOf(&token.ReplacedByTokenID), &version)
+	err := q.QueryRowContext(ctx, "SELECT grant_id, valid_until, delete_after, replaced_by_id, version FROM "+tblRefreshTokens+" WHERE id = ?", id).Scan(&token.GrantID, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), &token.ReplacedByTokenID, &version)
 	if err != nil {
 		return storedRefreshToken{}, 0, err
 	}
@@ -350,34 +338,26 @@ func (s *Storage) tableForKind(kind storageKind) (table, idColumn string, err er
 
 func (s *Storage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, request, granted_at, authenticated_at, expires_at, additional_state, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, request = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, additional_state = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
-		[]any{
-			value.ID, value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), jsonOf(&value.Request), s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt),
-			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState),
-			nullOf(&value.ACR), jsonArray(&value.AMR), version,
-		},
-		[]any{
-			value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), jsonOf(&value.Request), s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt),
-			s.timeOf(&value.ExpiresAt), jsonOf(&value.AdditionalState),
-			nullOf(&value.ACR), jsonArray(&value.AMR), version, value.ID,
-		})
+		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, redirect_uri, code_challenge, nonce, max_age, granted_at, authenticated_at, expires_at, dpop_thumbprint, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, redirect_uri = ?, code_challenge = ?, nonce = ?, max_age = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, dpop_thumbprint = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
+		[]any{value.ID, value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), value.RedirectURI, value.CodeChallenge, value.Nonce, value.MaxAge, s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt), s.timeOf(&value.ExpiresAt), value.DPoPThumbprint, value.ACR, jsonArray(&value.AMR), version},
+		[]any{value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), value.RedirectURI, value.CodeChallenge, value.Nonce, value.MaxAge, s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt), s.timeOf(&value.ExpiresAt), value.DPoPThumbprint, value.ACR, jsonArray(&value.AMR), version, value.ID})
 }
 
 func (s *Storage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblAuthCodes+" (id, grant_id, code, valid_until, delete_after, version) VALUES (?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblAuthCodes+" SET grant_id = ?, code = ?, valid_until = ?, delete_after = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version},
-		[]any{value.GrantID, value.Code, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version, value.ID})
+		"INSERT INTO "+tblAuthCodes+" (id, grant_id, valid_until, delete_after, version) VALUES (?, ?, ?, ?, ?)",
+		"UPDATE "+tblAuthCodes+" SET grant_id = ?, valid_until = ?, delete_after = ?, version = ? WHERE id = ?",
+		[]any{value.ID, value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version},
+		[]any{value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version, value.ID})
 }
 
 func (s *Storage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
 	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, token, valid_until, delete_after, replaced_by_id, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, token = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), version},
-		[]any{value.GrantID, value.Token, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), nullOf(&value.ReplacedByTokenID), version, value.ID})
+		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, valid_until, delete_after, replaced_by_id, version) VALUES (?, ?, ?, ?, ?, ?)",
+		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, version = ? WHERE id = ?",
+		[]any{value.ID, value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), value.ReplacedByTokenID, version},
+		[]any{value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), value.ReplacedByTokenID, version, value.ID})
 }
 
 func (s *Storage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
@@ -413,7 +393,7 @@ func (s *Storage) listRefreshSessions(ctx context.Context, query storageRefreshS
 	}
 	defer conn.Close()
 
-	statement := "SELECT rs.grant_id, g.user_id, g.client_id, g.granted_scopes, g.granted_at, g.authenticated_at, rs.expires_at, rs.last_used_at, g.additional_state FROM " +
+	statement := "SELECT rs.grant_id, g.user_id, g.client_id, g.granted_scopes, g.granted_at, g.authenticated_at, rs.expires_at, rs.last_used_at, g.dpop_thumbprint FROM " +
 		tblRefreshSessions + " rs JOIN " + tblGrants + " g ON g.id = rs.grant_id WHERE g.user_id = ? AND rs.expires_at > ?"
 	args := []any{query.UserID, s.timeOf(&query.ActiveAt)}
 	if query.ClientID != "" {
@@ -436,17 +416,17 @@ func (s *Storage) listRefreshSessions(ctx context.Context, query storageRefreshS
 	result := make([]storedRefreshSession, 0, query.Limit)
 	for rows.Next() {
 		var (
-			session         storedRefreshSession
-			additionalState storedAdditionalState
+			session    storedRefreshSession
+			thumbprint string
 		)
 		if err := rows.Scan(
 			&session.GrantID, &session.UserID, &session.ClientID, jsonArray(&session.GrantedScopes),
 			s.timeOf(&session.CreatedAt), s.nullTime(&session.AuthenticatedAt), s.timeOf(&session.ExpiresAt), s.timeOf(&session.LastUsedAt),
-			jsonOf(&additionalState),
+			&thumbprint,
 		); err != nil {
 			return nil, err
 		}
-		session.DPoPBound = additionalState.DPoPThumbprint != nil && *additionalState.DPoPThumbprint != ""
+		session.DPoPBound = thumbprint != ""
 		grant := storedGrant{AuthenticatedAt: session.AuthenticatedAt, GrantedAt: session.CreatedAt}
 		session.AuthenticatedAt = authTimeFromGrant(&grant)
 		result = append(result, session)
@@ -524,6 +504,7 @@ type sqlMigration struct {
 }
 
 // Migrate applies pending schema migrations. It is safe to call on every process start.
+// The version 3 upgrade discards existing OAuth grants, codes, tokens, and sessions.
 func (s *Storage) Migrate(ctx context.Context) error {
 	var err error
 	for attempt := range 4 {
@@ -562,7 +543,7 @@ func (s *Storage) migrateOnce(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS "+tblSchemaMigrations+" ("+
 		"version BIGINT PRIMARY KEY, "+
 		"name TEXT NOT NULL, "+
-		"applied_at TEXT NOT NULL"+
+		"applied_at INTEGER NOT NULL"+
 		")"); err != nil {
 		return fmt.Errorf("create schema migrations table: %w", err)
 	}
@@ -586,7 +567,8 @@ func (s *Storage) migrateOnce(ctx context.Context) error {
 	}
 	rows.Close()
 
-	known := make(map[int]struct{}, len(s.migrations))
+	// Versions 1 and 2 are replaced by the transactional reset in version 3.
+	known := map[int]struct{}{1: {}, 2: {}}
 	for _, migration := range s.migrations {
 		known[migration.version] = struct{}{}
 	}
@@ -616,76 +598,67 @@ func (s *Storage) migrateOnce(ctx context.Context) error {
 }
 
 func sqlMigrations() []sqlMigration {
-	// Keep the original schema, including unused metadata columns, compatible with existing databases.
-	// SQLite has no UUID or timestamptz. TEXT IDs store canonical UUID
-	// strings; TEXT timestamps use sqliteTimeFormat so they sort in time order.
-	const blob, js, id, ts = "BLOB", "JSON", "TEXT", "TEXT"
 	return []sqlMigration{{
-		version: 1,
-		name:    "initial_schema",
+		version: 3,
+		name:    "token_digest_schema",
+		// Existing OAuth grants and tokens are intentionally discarded. The reset is
+		// transactional and runs once; other tables in the shared database are untouched.
 		up: []string{
-			"CREATE TABLE " + tblGrants + " (" +
-				"id " + id + " PRIMARY KEY, " +
-				"user_id TEXT NOT NULL, " +
-				"client_id TEXT NOT NULL, " +
-				"granted_scopes " + js + " NOT NULL, " +
-				"request " + js + ", " +
-				"granted_at " + ts + " NOT NULL, " +
-				"authenticated_at " + ts + ", " +
-				"expires_at " + ts + " NOT NULL, " +
-				"additional_state " + js + ", " +
-				"metadata " + blob + ", " +
-				"encrypted_metadata " + blob + ", " +
-				"acr TEXT, " +
-				"amr " + js + ", " +
-				"version BIGINT NOT NULL CHECK (version > 0)" +
-				")",
+			"DROP TABLE IF EXISTS " + tblRefreshSessions,
+			"DROP TABLE IF EXISTS " + tblRefreshTokens,
+			"DROP TABLE IF EXISTS " + tblAuthCodes,
+			"DROP TABLE IF EXISTS " + tblGrants,
+			`CREATE TABLE oauth2as_grants (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    granted_scopes JSON NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    max_age INTEGER,
+    granted_at INTEGER NOT NULL,
+    authenticated_at INTEGER,
+    expires_at INTEGER NOT NULL,
+    dpop_thumbprint TEXT NOT NULL,
+    acr TEXT NOT NULL,
+    amr JSON NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0)
+   )`,
 			"CREATE INDEX " + idxGrantOwner + " ON " + tblGrants + " (user_id, client_id, id)",
 			"CREATE INDEX " + idxGrantExpiry + " ON " + tblGrants + " (expires_at)",
-			"CREATE TABLE " + tblAuthCodes + " (" +
-				"id " + id + " PRIMARY KEY, " +
-				"grant_id " + id + " NOT NULL REFERENCES " + tblGrants + "(id) ON DELETE CASCADE, " +
-				"code " + blob + " NOT NULL, " +
-				"valid_until " + ts + " NOT NULL, " +
-				"delete_after " + ts + " NOT NULL, " +
-				"encrypted_grant_key " + blob + ", " +
-				"version BIGINT NOT NULL CHECK (version > 0)" +
-				")",
+			`CREATE TABLE oauth2as_authorization_codes (
+    id TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
+    valid_until INTEGER NOT NULL,
+    delete_after INTEGER NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0)
+   )`,
 			"CREATE INDEX " + idxCodeExpiry + " ON " + tblAuthCodes + " (delete_after)",
 			"CREATE INDEX " + idxCodeGrant + " ON " + tblAuthCodes + " (grant_id)",
-			"CREATE TABLE " + tblRefreshTokens + " (" +
-				"id " + id + " PRIMARY KEY, " +
-				"grant_id " + id + " NOT NULL REFERENCES " + tblGrants + "(id) ON DELETE CASCADE, " +
-				"token " + blob + " NOT NULL, " +
-				"valid_until " + ts + " NOT NULL, " +
-				"delete_after " + ts + " NOT NULL, " +
-				"replaced_by_id " + id + ", " +
-				"encrypted_grant_key " + blob + ", " +
-				"version BIGINT NOT NULL CHECK (version > 0)" +
-				")",
+			`CREATE TABLE oauth2as_refresh_tokens (
+    id TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
+    valid_until INTEGER NOT NULL,
+    delete_after INTEGER NOT NULL,
+    replaced_by_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0)
+   )`,
 			"CREATE INDEX " + idxTokenExpiry + " ON " + tblRefreshTokens + " (delete_after)",
 			"CREATE INDEX " + idxTokenGrant + " ON " + tblRefreshTokens + " (grant_id)",
-			"CREATE TABLE " + tblRefreshSessions + " (" +
-				"grant_id " + id + " PRIMARY KEY REFERENCES " + tblGrants + "(id) ON DELETE CASCADE, " +
-				"expires_at " + ts + " NOT NULL, " +
-				"last_used_at " + ts + " NOT NULL, " +
-				"version BIGINT NOT NULL CHECK (version > 0)" +
-				")",
+			`CREATE TABLE oauth2as_refresh_sessions (
+    grant_id TEXT PRIMARY KEY REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    last_used_at INTEGER NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0)
+   )`,
 			"CREATE INDEX " + idxSessionActive + " ON " + tblRefreshSessions + " (expires_at, last_used_at, grant_id)",
 		},
 	}}
 }
 
-func jsonOf[T any](v *T) *sqlJSON[T] {
-	return &sqlJSON[T]{v: v}
-}
-
 func jsonArray[T any](v *T) *sqlJSON[T] {
 	return &sqlJSON[T]{v: v, emptyArray: true}
-}
-
-func nullOf[T ~string | ~[]byte](v *T) *sqlNull[T] {
-	return &sqlNull[T]{v: v}
 }
 
 func (s *Storage) timeOf(t *time.Time) *sqlTime {
@@ -748,64 +721,6 @@ func (j *sqlJSON[T]) emptyValue() driver.Value {
 	return nil
 }
 
-type sqlNull[T ~string | ~[]byte] struct {
-	v *T
-}
-
-func (n *sqlNull[T]) Scan(src any) error {
-	if n == nil || n.v == nil {
-		return fmt.Errorf("oauth2as: null scan into nil")
-	}
-	if src == nil {
-		var zero T
-		*n.v = zero
-		return nil
-	}
-	switch dest := any(n.v).(type) {
-	case *string:
-		switch v := src.(type) {
-		case string:
-			*dest = v
-		case []byte:
-			*dest = string(v)
-		default:
-			return fmt.Errorf("oauth2as: unsupported string type %T", src)
-		}
-	case *[]byte:
-		switch v := src.(type) {
-		case []byte:
-			*dest = bytes.Clone(v)
-		case string:
-			*dest = []byte(v)
-		default:
-			return fmt.Errorf("oauth2as: unsupported bytes type %T", src)
-		}
-	default:
-		return fmt.Errorf("oauth2as: unsupported null dest %T", n.v)
-	}
-	return nil
-}
-
-func (n *sqlNull[T]) Value() (driver.Value, error) {
-	if n == nil || n.v == nil {
-		return nil, nil
-	}
-	switch v := any(*n.v).(type) {
-	case string:
-		if v == "" {
-			return nil, nil
-		}
-		return v, nil
-	case []byte:
-		if len(v) == 0 {
-			return nil, nil
-		}
-		return v, nil
-	default:
-		return nil, fmt.Errorf("oauth2as: unsupported null type %T", *n.v)
-	}
-}
-
 type sqlTime struct {
 	t        *time.Time
 	nullable bool
@@ -819,28 +734,11 @@ func (t *sqlTime) Scan(src any) error {
 		*t.t = time.Time{}
 		return nil
 	}
-	switch v := src.(type) {
-	case time.Time:
-		*t.t = v.UTC().Truncate(time.Microsecond)
-		return nil
-	case string:
-		return t.parse(v)
-	case []byte:
-		return t.parse(string(v))
-	default:
+	value, ok := src.(int64)
+	if !ok {
 		return fmt.Errorf("oauth2as: unsupported time type %T", src)
 	}
-}
-
-func (t *sqlTime) parse(value string) error {
-	parsed, err := time.Parse(sqliteTimeFormat, value)
-	if err != nil {
-		parsed, err = time.Parse(time.RFC3339Nano, value)
-		if err != nil {
-			return err
-		}
-	}
-	*t.t = parsed.UTC().Truncate(time.Microsecond)
+	*t.t = time.UnixMicro(value).UTC()
 	return nil
 }
 
@@ -848,5 +746,5 @@ func (t *sqlTime) Value() (driver.Value, error) {
 	if t == nil || t.t == nil || (t.nullable && t.t.IsZero()) {
 		return nil, nil
 	}
-	return truncateTime(*t.t).Format(sqliteTimeFormat), nil
+	return t.t.UnixMicro(), nil
 }

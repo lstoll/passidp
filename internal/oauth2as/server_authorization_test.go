@@ -662,11 +662,11 @@ func TestGrantAuthStoresAuthenticatedAt(t *testing.T) {
 		t.Fatal("expected code in redirect")
 	}
 
-	pt, err := token.ParseUserToken(code, tokenUsageAuthCode)
+	codeID, err := token.Digest(code, token.AuthorizationCode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, grant, err := storage.getAuthCodeAndGrant(context.Background(), pt.ID())
+	_, grant, err := storage.getAuthCodeAndGrant(context.Background(), codeID)
 	if err != nil {
 		t.Fatal(err)
 	}

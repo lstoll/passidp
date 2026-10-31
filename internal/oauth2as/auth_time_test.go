@@ -68,13 +68,13 @@ func TestAuthTimeExceeded(t *testing.T) {
 
 func TestMaxAgeFromGrantReturnsCopy(t *testing.T) {
 	maxAge := 60
-	grant := &storedGrant{Request: &AuthRequest{MaxAge: &maxAge}}
+	grant := &storedGrant{MaxAge: &maxAge}
 	got := maxAgeFromGrant(grant)
 	if got == nil || *got != maxAge {
 		t.Fatalf("max age: got %v", got)
 	}
 	*got = 30
-	if *grant.Request.MaxAge != 60 {
+	if *grant.MaxAge != 60 {
 		t.Fatal("returned max age aliases stored grant")
 	}
 }

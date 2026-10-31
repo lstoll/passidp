@@ -20,7 +20,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"uuid"
 
 	"lds.li/oauth2ext/jwt"
 	"lds.li/oauth2ext/oidc"
@@ -147,11 +146,11 @@ func TestCodeToken(t *testing.T) {
 	t.Run("Expired authorization code should fail", func(t *testing.T) {
 		o := newOIDC()
 		codeToken := newCodeGrant(t, o.config.Storage)
-		parsed, err := token.ParseUserToken(codeToken, tokenUsageAuthCode)
+		codeID, err := token.Digest(codeToken, token.AuthorizationCode)
 		if err != nil {
 			t.Fatal(err)
 		}
-		code, err := o.config.Storage.getAuthCode(t.Context(), parsed.ID())
+		code, err := o.config.Storage.getAuthCode(t.Context(), codeID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -258,12 +257,7 @@ func TestCodeToken(t *testing.T) {
 			GrantedScopes: []string{oidc.ScopeOpenID, oidc.ScopeOfflineAccess},
 			GrantedAt:     time.Now(),
 			ExpiresAt:     time.Now().Add(1 * time.Minute),
-			Request: &AuthRequest{
-				ClientID:    rs256ClientID,
-				RedirectURI: rs256ClientRedirect,
-				State:       "",
-				Scopes:      []string{oidc.ScopeOpenID, oidc.ScopeOfflineAccess},
-			},
+			RedirectURI:   rs256ClientRedirect,
 		}
 
 		grantID, err := o.config.Storage.createGrant(context.Background(), grant)
@@ -271,15 +265,10 @@ func TestCodeToken(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		authCodeID := uuid.NewV4().String()
-		newToken, err := token.New(tokenUsageAuthCode, authCodeID, grantID, grant.UserID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		authCodeStr, authCodeID := token.New(token.AuthorizationCode)
 
 		// Create token entry for the auth code
 		err = o.config.Storage.createAuthCode(context.Background(), authCodeID, &storedAuthCode{
-			Code:             newToken.Stored(),
 			GrantID:          grantID,
 			ValidUntil:       time.Now().Add(1 * time.Minute),
 			StorageExpiresAt: time.Now().Add(1 * time.Minute),
@@ -287,8 +276,6 @@ func TestCodeToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		authCodeStr := newToken.UserToken()
-
 		treq := &oauth2proto.TokenRequest{
 			GrantType:    oauth2proto.GrantTypeAuthorizationCode,
 			Code:         authCodeStr,
@@ -915,15 +902,10 @@ func newRefreshGrant(t *testing.T, smgr *Storage) (refreshToken string) {
 		t.Fatal(err)
 	}
 
-	refreshTokenID := uuid.NewV4().String()
-	newToken, err := token.New(tokenUsageRefresh, refreshTokenID, grantID, grant.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	refreshToken, refreshTokenID := token.New(token.RefreshToken)
 
 	// Create token entry for the refresh token
 	err = smgr.createRefreshToken(context.Background(), refreshTokenID, &storedRefreshToken{
-		Token:            newToken.Stored(),
 		GrantID:          grantID,
 		ValidUntil:       time.Now().Add(6 * time.Hour),
 		StorageExpiresAt: time.Now().Add(6 * time.Hour),
@@ -932,7 +914,7 @@ func newRefreshGrant(t *testing.T, smgr *Storage) (refreshToken string) {
 		t.Fatal(err)
 	}
 
-	return newToken.UserToken()
+	return refreshToken
 }
 
 func newCodeGrant(t *testing.T, smgr *Storage) (authCode string) {
@@ -943,12 +925,7 @@ func newCodeGrant(t *testing.T, smgr *Storage) (authCode string) {
 		GrantedScopes: []string{oidc.ScopeOfflineAccess},
 		GrantedAt:     time.Now(),
 		ExpiresAt:     time.Now().Add(1 * time.Minute),
-		Request: &AuthRequest{
-			ClientID:    "client-id",
-			RedirectURI: "https://redirect",
-			State:       "",
-			Scopes:      []string{oidc.ScopeOfflineAccess},
-		},
+		RedirectURI:   "https://redirect",
 	}
 
 	grantID, err := smgr.createGrant(context.Background(), grant)
@@ -956,15 +933,10 @@ func newCodeGrant(t *testing.T, smgr *Storage) (authCode string) {
 		t.Fatal(err)
 	}
 
-	authCodeID := uuid.NewV4().String()
-	newToken, err := token.New(tokenUsageAuthCode, authCodeID, grantID, grant.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authCode, authCodeID := token.New(token.AuthorizationCode)
 
 	// Create token entry for the auth code
 	err = smgr.createAuthCode(context.Background(), authCodeID, &storedAuthCode{
-		Code:             newToken.Stored(),
 		GrantID:          grantID,
 		ValidUntil:       time.Now().Add(1 * time.Minute),
 		StorageExpiresAt: time.Now().Add(1 * time.Minute),
@@ -973,7 +945,7 @@ func newCodeGrant(t *testing.T, smgr *Storage) (authCode string) {
 		t.Fatal(err)
 	}
 
-	return newToken.UserToken()
+	return authCode
 }
 
 // staticClientSource is a test ClientSource over a fixed list of clients.

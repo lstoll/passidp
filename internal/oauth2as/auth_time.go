@@ -33,11 +33,8 @@ func authTimeFromGrant(grant *storedGrant) time.Time {
 }
 
 func maxAgeFromGrant(grant *storedGrant) *int {
-	if grant == nil || grant.Request == nil {
+	if grant == nil || grant.MaxAge == nil {
 		return nil
 	}
-	if grant.Request.MaxAge == nil {
-		return nil
-	}
-	return new(*grant.Request.MaxAge)
+	return new(*grant.MaxAge)
 }

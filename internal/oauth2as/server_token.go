@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,17 +16,11 @@ import (
 	"lds.li/oauth2ext/dpop"
 	"lds.li/oauth2ext/jwt"
 	"lds.li/oauth2ext/oidc"
-	"lds.li/passidp/internal/oauth2as/internal/token"
 	"lds.li/passidp/internal/oauth2as/oauth2proto"
 )
 
 const (
 	claimGrantID = "grid"
-)
-
-var (
-	tokenUsageAuthCode = token.Usage{Name: "auth_code", Prefix: "c"}
-	tokenUsageRefresh  = token.Usage{Name: "refresh_token", Prefix: "r"}
 )
 
 type TokenHandler func(_ context.Context, req *TokenRequest) (*TokenResponse, error)
@@ -168,12 +161,8 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		return nil, fmt.Errorf("failed to get grant by auth code: %w", err)
 	}
 
-	if loadedGrant.grant.Request == nil {
-		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid grant"}
-	}
-
 	// Validate that the redirect_uri matches the one from the authorization request
-	if treq.RedirectURI != loadedGrant.grant.Request.RedirectURI {
+	if treq.RedirectURI != loadedGrant.grant.RedirectURI {
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "redirect URI mismatch"}
 	}
 
@@ -189,7 +178,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 
 	// Verify the code verifier against the session data
 	if treq.CodeVerifier != "" {
-		if !verifyCodeChallenge(treq.CodeVerifier, loadedGrant.grant.Request.CodeChallenge) {
+		if !verifyCodeChallenge(treq.CodeVerifier, loadedGrant.grant.CodeChallenge) {
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeUnauthorizedClient, Description: "PKCE verification failed"}
 		}
 	}
@@ -212,7 +201,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 
 	// Update the grant with DPoP thumbprint if present
 	if dpopThumbprint != "" {
-		loadedGrant.additionalState.DPoPThumbprint = &dpopThumbprint
+		loadedGrant.grant.DPoPThumbprint = dpopThumbprint
 	}
 
 	prepared, err := s.prepareTokenResponse(ctx, client, loadedGrant, false, dpopProof)
@@ -260,14 +249,10 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 	replacedTokenID := loadedGrant.refreshToken.ReplacedByTokenID
 
 	// Enforce DPoP binding if the grant was initiated with DPoP
-	var storedThumbprint string
-	if loadedGrant.additionalState.DPoPThumbprint != nil {
-		storedThumbprint = *loadedGrant.additionalState.DPoPThumbprint
-	}
+	storedThumbprint := loadedGrant.grant.DPoPThumbprint
 
 	var dpopProof *dpop.Proof
 	if storedThumbprint != "" {
-		var err error
 		dpopProof, err = s.verifyDPoPProof(s.config.Issuer, req, &storedThumbprint, "")
 		if err != nil {
 			if errors.Is(err, dpop.ErrProofReplay) {
@@ -317,7 +302,7 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		if replacedTokenID == "" {
 			loadedGrant.refreshToken.ValidUntil = s.now().Add(s.config.RefreshTokenRotationGracePeriod)
 		}
-		loadedGrant.refreshToken.ReplacedByTokenID = prepared.refreshTokenID
+		loadedGrant.refreshToken.ReplacedByTokenID = prepared.refreshToken.ID
 		commit.RefreshTokens = append(commit.RefreshTokens, *loadedGrant.refreshToken)
 	}
 
@@ -368,7 +353,6 @@ func invalidDPoPProofError(cause error) *oauth2proto.TokenError {
 
 type preparedTokenResponse struct {
 	response       *oauth2proto.TokenResponse
-	refreshTokenID string
 	refreshToken   *storedRefreshToken
 	refreshSession *storedRefreshSession
 }
@@ -376,14 +360,7 @@ type preparedTokenResponse struct {
 // buildTokenResponse creates and signs the complete response without changing
 // storage. The caller atomically commits the prepared grant and token records.
 func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Algorithm, loadedGrant *loadedGrant, tresp *TokenResponse, isDPoPBound bool) (*preparedTokenResponse, error) {
-	additionalState, err := json.Marshal(&loadedGrant.additionalState)
-	if err != nil {
-		return nil, fmt.Errorf("marshalling additional grant state: %w", err)
-	}
-	loadedGrant.grant.AdditionalState = additionalState
-
 	var refreshToken string
-	var rtID string
 	var storedRefreshToken *storedRefreshToken
 	var refreshSession *storedRefreshSession
 	if s.config.RefreshTokenValidity > 0 && slices.Contains(loadedGrant.grant.GrantedScopes, oidc.ScopeOfflineAccess) {
@@ -397,10 +374,7 @@ func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Al
 			rtUntil = loadedGrant.grant.ExpiresAt
 		}
 
-		refreshToken, rtID, storedRefreshToken, err = prepareRefreshToken(loadedGrant.grant, rtUntil)
-		if err != nil {
-			return nil, fmt.Errorf("preparing refresh token: %w", err)
-		}
+		refreshToken, storedRefreshToken = prepareRefreshToken(loadedGrant.grant, rtUntil)
 		grant := loadedGrant.grant
 		refreshSession = &storedRefreshSession{
 			GrantID:         loadedGrant.grant.ID,
@@ -453,7 +427,6 @@ func (s *Server) buildTokenResponse(ctx context.Context, idTokenAlgorithm jwt.Al
 			Scopes:       slices.Clone(grant.GrantedScopes),
 			ExtraParams:  extraParams,
 		},
-		refreshTokenID: rtID,
 		refreshToken:   storedRefreshToken,
 		refreshSession: refreshSession,
 	}, nil
@@ -482,8 +455,8 @@ func (s *Server) buildIDClaims(grant *storedGrant, tresp *TokenResponse) (signin
 	claims["iat"] = s.now().Unix()
 	claims["exp"] = idExp.Unix()
 	claims["auth_time"] = authTimeFromGrant(grant).Unix()
-	if grant.Request != nil && grant.Request.Nonce != "" {
-		claims["nonce"] = grant.Request.Nonce
+	if grant.Nonce != "" {
+		claims["nonce"] = grant.Nonce
 	}
 	if grant.ACR != "" {
 		claims["acr"] = grant.ACR
@@ -529,15 +502,10 @@ func (s *Server) buildAccessTokenClaims(grantID string, grant *storedGrant, tres
 	claims["scope"] = strings.Join(scopes, " ")
 	claims[claimGrantID] = grantID
 
-	var addState storedAdditionalState
-	if len(grant.AdditionalState) > 0 {
-		if err := json.Unmarshal(grant.AdditionalState, &addState); err != nil {
-			return signingInput{}, time.Time{}, fmt.Errorf("failed to unmarshal additional state: %w", err)
-		}
+	if grant.DPoPThumbprint != "" {
+		claims["cnf"] = map[string]any{"jkt": grant.DPoPThumbprint}
 	}
-	if addState.DPoPThumbprint != nil {
-		claims["cnf"] = map[string]any{"jkt": *addState.DPoPThumbprint}
-	}
+
 	return signingInput{Type: "at+jwt", Claims: claims}, atExp, nil
 }
 

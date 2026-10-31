@@ -174,13 +174,15 @@ func (s *Server) GrantAuth(ctx context.Context, grant *AuthGrant) (redirectURI s
 		UserID:          grant.UserID,
 		ClientID:        grant.Request.ClientID,
 		GrantedScopes:   grant.GrantedScopes,
-		Request:         grant.Request,
+		RedirectURI:     redirURI,
+		CodeChallenge:   grant.Request.CodeChallenge,
+		Nonce:           grant.Request.Nonce,
+		MaxAge:          grant.Request.MaxAge,
 		GrantedAt:       now,
 		AuthenticatedAt: authenticatedAt,
 		ExpiresAt:       expiresAt, // Grant has absolute lifetime
-
-		ACR: grant.ACR,
-		AMR: slices.Clone(grant.AMR),
+		ACR:             grant.ACR,
+		AMR:             slices.Clone(grant.AMR),
 	}
 
 	loadedGrant := &loadedGrant{

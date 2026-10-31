@@ -59,11 +59,11 @@ func TestTokenCommitFailuresAreAtomic(t *testing.T) {
 		t.Fatal("code exchange unexpectedly succeeded")
 	}
 
-	parsed, err := token.ParseUserToken(authCode, tokenUsageAuthCode)
+	authCodeID, err := token.Digest(authCode, token.AuthorizationCode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.getAuthCode(t.Context(), parsed.ID()); err != nil {
+	if _, err := store.getAuthCode(t.Context(), authCodeID); err != nil {
 		t.Fatalf("authorization code was consumed by failed commit: %v", err)
 	}
 	if count := refreshTokenCount(t, store); count != 0 {

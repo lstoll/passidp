@@ -15,6 +15,7 @@ import (
 
 	"lds.li/oauth2ext/dpop"
 	"lds.li/oauth2ext/jwt"
+	"lds.li/passidp/internal/oauth2as/internal/token"
 	"lds.li/passidp/internal/oauth2as/oauth2proto"
 )
 
@@ -74,6 +75,15 @@ func TestRefreshReuseRequiresAuthentication(t *testing.T) {
 				}
 				refresh := func(token, secret string, proof bool) (*oauth2proto.TokenResponse, error) {
 					return server.refreshToken(t.Context(), request(proof), &oauth2proto.TokenRequest{RefreshToken: token, ClientID: "client", ClientSecret: secret})
+				}
+				digest, err := token.Digest(issued.RefreshToken, token.RefreshToken)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, invalid := range []string{digest, "pr1_" + digest, issued.RefreshToken + "X"} {
+					if _, err := refresh(invalid, "secret", bound); err == nil {
+						t.Fatal("stored digest or modified token was accepted")
+					}
 				}
 				replacement, err := refresh(issued.RefreshToken, "secret", bound)
 				if err != nil {

@@ -1,7 +1,6 @@
 package oauth2as
 
 import (
-	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"strings"
 	"testing"
@@ -11,10 +10,6 @@ import (
 func TestBuildTokenClaims(t *testing.T) {
 	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
 	thumbprint := "dpop-thumbprint"
-	additionalState, err := json.Marshal(storedAdditionalState{DPoPThumbprint: &thumbprint})
-	if err != nil {
-		t.Fatal(err)
-	}
 	server := &Server{
 		config: Config{
 			Issuer:              "https://issuer.example",
@@ -31,8 +26,8 @@ func TestBuildTokenClaims(t *testing.T) {
 		AuthenticatedAt: now.Add(-30 * time.Second),
 		ACR:             "urn:example:mfa",
 		AMR:             []string{"pwd", "otp"},
-		AdditionalState: additionalState,
-		Request:         &AuthRequest{Nonce: "request-nonce"},
+		DPoPThumbprint:  thumbprint,
+		Nonce:           "request-nonce",
 	}
 	idAdditional := map[string]any{"groups": []string{"engineering"}}
 	accessAdditional := map[string]any{"employee_type": "employee"}

@@ -217,10 +217,10 @@ func assertSQLColumnTypes(t *testing.T, db *sql.DB) {
 	}
 	for _, want := range []string{
 		"id TEXT PRIMARY KEY",
-		"granted_at TEXT NOT NULL",
+		"granted_at INTEGER NOT NULL",
 		"user_id TEXT NOT NULL",
 		"granted_scopes JSON NOT NULL",
-		"metadata BLOB",
+		"dpop_thumbprint TEXT NOT NULL",
 	} {
 		if !strings.Contains(schema, want) {
 			t.Fatalf("sqlite oauth2as_grants schema = %s, want %q", schema, want)

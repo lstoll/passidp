@@ -2,7 +2,6 @@ package oauth2as
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -19,23 +18,22 @@ var (
 
 // loadedGrant holds a grant and the credential used to load it.
 type loadedGrant struct {
-	grant           *storedGrant
-	authCode        *storedAuthCode
-	refreshToken    *storedRefreshToken
-	additionalState storedAdditionalState
+	grant        *storedGrant
+	authCode     *storedAuthCode
+	refreshToken *storedRefreshToken
 }
 
 func (l *loadedGrant) dpopBound() bool {
-	return l.additionalState.DPoPThumbprint != nil && *l.additionalState.DPoPThumbprint != ""
+	return l.grant.DPoPThumbprint != ""
 }
 
 func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string) (*loadedGrant, error) {
-	parsedCode, err := token.ParseUserToken(presentedCode, tokenUsageAuthCode)
+	codeID, err := token.Digest(presentedCode, token.AuthorizationCode)
 	if err != nil {
 		return nil, errGrantTokenInvalid
 	}
 
-	storedCode, grant, err := s.config.Storage.getAuthCodeAndGrant(ctx, parsedCode.ID())
+	storedCode, grant, err := s.config.Storage.getAuthCodeAndGrant(ctx, codeID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, errGrantNotFound
@@ -54,32 +52,21 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 		return nil, errGrantExpired
 	}
 
-	_, err = parsedCode.Verify(storedCode.Code, storedCode.GrantID, grant.UserID)
-	if err != nil {
-		return nil, errGrantTokenInvalid
-	}
-
 	loadedGrant := &loadedGrant{
 		grant:    grant,
 		authCode: storedCode,
-	}
-
-	if len(grant.AdditionalState) > 0 {
-		if err := json.Unmarshal(grant.AdditionalState, &loadedGrant.additionalState); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal additional state: %w", err)
-		}
 	}
 
 	return loadedGrant, nil
 }
 
 func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken string) (*loadedGrant, error) {
-	parsedToken, err := token.ParseUserToken(presentedToken, tokenUsageRefresh)
+	tokenID, err := token.Digest(presentedToken, token.RefreshToken)
 	if err != nil {
 		return nil, errGrantTokenInvalid
 	}
 
-	storedToken, grant, err := s.config.Storage.getRefreshTokenAndGrant(ctx, parsedToken.ID())
+	storedToken, grant, err := s.config.Storage.getRefreshTokenAndGrant(ctx, tokenID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, errGrantNotFound
@@ -99,20 +86,9 @@ func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken st
 		return nil, errGrantExpired
 	}
 
-	_, err = parsedToken.Verify(storedToken.Token, storedToken.GrantID, grant.UserID)
-	if err != nil {
-		return nil, errGrantTokenInvalid
-	}
-
 	loadedGrant := &loadedGrant{
 		grant:        grant,
 		refreshToken: storedToken,
-	}
-
-	if len(grant.AdditionalState) > 0 {
-		if err := json.Unmarshal(grant.AdditionalState, &loadedGrant.additionalState); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal additional state: %w", err)
-		}
 	}
 
 	return loadedGrant, nil
@@ -120,25 +96,14 @@ func (s *Server) getGrantFromRefreshToken(ctx context.Context, presentedToken st
 
 // putGrantWithAuthCode creates the grant and auth code, returning grant ID and token string.
 func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedGrant, codeExpiresAt time.Time) (grantID string, tokenString string, err error) {
-	addlb, err := json.Marshal(loadedGrant.additionalState)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal additional state: %w", err)
-	}
-	loadedGrant.grant.AdditionalState = addlb
-
 	// Generate both IDs before writing so the grant and its authorization code
 	// can be created in one atomic commit.
 	grid := uuid.NewV4().String()
-	cid := uuid.NewV4().String()
-	tok, err := token.New(tokenUsageAuthCode, cid, grid, loadedGrant.grant.UserID)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to generate authorization code: %w", err)
-	}
+	raw, cid := token.New(token.AuthorizationCode)
 
 	storedCode := &storedAuthCode{
 		ID:               cid,
 		GrantID:          grid,
-		Code:             tok.Stored(),
 		ValidUntil:       codeExpiresAt,
 		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep code around as long as the grant
 	}
@@ -156,27 +121,18 @@ func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedGr
 	loadedGrant.grant.storageVersion = 1
 	storedCode.storageVersion = 1
 
-	return grid, tok.UserToken(), nil
+	return grid, raw, nil
 }
 
 // prepareRefreshToken creates the opaque token and its storage record without
 // writing either the token or grant. The caller commits all related changes as
 // one conditional batch after the response has been successfully built.
-func prepareRefreshToken(grant *storedGrant, tokenExpiresAt time.Time) (tokenString string, tokenID string, storedToken *storedRefreshToken, err error) {
-	if grant.ID == "" {
-		return "", "", nil, fmt.Errorf("grant ID is required")
-	}
-	tid := uuid.NewV4().String()
-	tok, err := token.New(tokenUsageRefresh, tid, grant.ID, grant.UserID)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to generate refresh token: %w", err)
-	}
-
-	storedToken = &storedRefreshToken{
+func prepareRefreshToken(grant *storedGrant, tokenExpiresAt time.Time) (string, *storedRefreshToken) {
+	raw, id := token.New(token.RefreshToken)
+	return raw, &storedRefreshToken{
+		ID:               id,
 		GrantID:          grant.ID,
-		Token:            tok.Stored(),
 		ValidUntil:       tokenExpiresAt,
-		StorageExpiresAt: grant.ExpiresAt, // Keep token around as long as the grant
+		StorageExpiresAt: grant.ExpiresAt, // Keep consumed digests for replay detection.
 	}
-	return tok.UserToken(), tid, storedToken, nil
 }

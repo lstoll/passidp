@@ -59,8 +59,8 @@ func TestStorageCleanupCascadesGrantChildren(t *testing.T) {
 			{Kind: storageKindSession, ID: grantID},
 		},
 		Grants:        []storedGrant{{ID: grantID, UserID: "user", ClientID: "client", ExpiresAt: now}},
-		AuthCodes:     []storedAuthCode{{ID: "code-1", Code: []byte("code"), GrantID: grantID, StorageExpiresAt: now.Add(time.Hour)}},
-		RefreshTokens: []storedRefreshToken{{ID: "token-1", Token: []byte("token"), GrantID: grantID, StorageExpiresAt: now.Add(time.Hour)}},
+		AuthCodes:     []storedAuthCode{{ID: "code-1", GrantID: grantID, StorageExpiresAt: now.Add(time.Hour)}},
+		RefreshTokens: []storedRefreshToken{{ID: "token-1", GrantID: grantID, StorageExpiresAt: now.Add(time.Hour)}},
 		Sessions:      []storedRefreshSession{{GrantID: grantID, UserID: "user", ClientID: "client", ExpiresAt: now}},
 	}); err != nil {
 		t.Fatal(err)

@@ -47,7 +47,6 @@ func tokenResponseCommit(grant *storedGrant, prepared *preparedTokenResponse) st
 	commit := storageCommit{Grants: []storedGrant{*grant}}
 	if prepared.refreshToken != nil {
 		token := *prepared.refreshToken
-		token.ID = prepared.refreshTokenID
 		session := *prepared.refreshSession
 		commit.RefreshTokens = append(commit.RefreshTokens, token)
 		commit.Sessions = append(commit.Sessions, session)

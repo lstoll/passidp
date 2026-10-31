@@ -2,7 +2,6 @@ package oauth2as
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -56,66 +55,61 @@ type storageCommit struct {
 // storedAuthCode represents an authorization code that is issued during the
 // authorization flow. Auth codes are short-lived and single-use.
 type storedAuthCode struct {
+	// ID is the hex SHA-256 digest of the full authorization code.
 	ID      string
-	Code    []byte `json:"code,omitzero"`
-	GrantID string `json:"grantId,omitzero"`
+	GrantID string
 	// ValidUntil is the time at which the code is no longer valid for use.
-	ValidUntil time.Time `json:"validUntil,omitzero"`
+	ValidUntil time.Time
 	// StorageExpiresAt is the time at which the code can be deleted from storage.
 	// This is typically after ValidUntil to allow for cleanup.
-	StorageExpiresAt time.Time `json:"storageExpiresAt,omitzero"`
+	StorageExpiresAt time.Time
 	storageVersion   uint64
 }
 
 // storedRefreshToken represents a refresh token that can be used to obtain new
 // access tokens. Refresh tokens are long-lived and support rotation with grace periods.
 type storedRefreshToken struct {
+	// ID is the hex SHA-256 digest of the full refresh token.
 	ID      string
-	Token   []byte `json:"token,omitzero"`
-	GrantID string `json:"grantId,omitzero"`
+	GrantID string
 	// ValidUntil is the time at which the token is no longer valid for use.
-	ValidUntil time.Time `json:"validUntil,omitzero"`
+	ValidUntil time.Time
 	// StorageExpiresAt is the time at which the token can be deleted from storage.
 	// This is typically after ValidUntil plus any grace period.
-	StorageExpiresAt time.Time `json:"storageExpiresAt,omitzero"`
+	StorageExpiresAt time.Time
 	// ReplacedByTokenID is the ID of the token that replaced this one during rotation.
 	// Used for tracking rotation chains and enforcing grace period policies.
-	ReplacedByTokenID string `json:"replacedByTokenID,omitzero"`
+	ReplacedByTokenID string
 	storageVersion    uint64
 }
 
 type storedGrant struct {
 	ID string
 	// UserID is the user ID that was granted access.
-	UserID string `json:"userId,omitzero"`
+	UserID string
 	// ClientID is the client ID that was granted access.
-	ClientID string `json:"clientId,omitzero"`
+	ClientID string
 	// GrantedScopes are the scopes that were actually granted.
-	GrantedScopes []string `json:"grantedScopes,omitzero"`
-	// Request captures the request that was used to grant access. Used for
-	// finalizing the code flow.
-	Request *AuthRequest `json:"request,omitzero"`
+	GrantedScopes []string
+	// Fields retained from the authorization request for exchange and token claims.
+	RedirectURI    string
+	CodeChallenge  string
+	Nonce          string
+	MaxAge         *int
+	DPoPThumbprint string
 	// GrantedAt is the time at which the grant was granted.
-	GrantedAt time.Time `json:"grantedAt,omitzero"`
+	GrantedAt time.Time
 	// AuthenticatedAt is when the End-User last actively authenticated. Emitted
 	// as the auth_time claim in ID tokens.
-	AuthenticatedAt time.Time `json:"authenticatedAt,omitzero"`
+	AuthenticatedAt time.Time
 	// ExpiresAt is the time at which the grant will expire.
-	ExpiresAt time.Time `json:"expiresAt,omitzero"`
-
-	// AdditionalState contains private protocol state encoded inside the
-	// package-owned grant record.
-	AdditionalState json.RawMessage `json:"additionalState,omitzero"`
+	ExpiresAt time.Time
 
 	// ACR is the Authentication Context Class Reference satisfied for this grant.
-	ACR string `json:"acr,omitzero"`
+	ACR string
 	// AMR lists the Authentication Methods References for this grant.
-	AMR            []string `json:"amr,omitzero"`
+	AMR            []string
 	storageVersion uint64
-}
-
-type storedAdditionalState struct {
-	DPoPThumbprint *string `json:"dpopThumbprint,omitzero"`
 }
 
 type storedRefreshSession struct {

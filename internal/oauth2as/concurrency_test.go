@@ -61,22 +61,15 @@ func TestRefreshTokenConcurrency(t *testing.T) {
 		t.Fatalf("failed to create grant: %v", err)
 	}
 
-	rtID := "rt-1"
-	tok, err := token.New(tokenUsageRefresh, rtID, gid, userID)
-	if err != nil {
-		t.Fatalf("failed to generate refresh token: %v", err)
-	}
+	rtString, rtID := token.New(token.RefreshToken)
 	rt := &storedRefreshToken{
 		GrantID:          gid,
-		Token:            tok.Stored(),
 		ValidUntil:       time.Now().Add(1 * time.Hour),
 		StorageExpiresAt: time.Now().Add(1 * time.Hour),
 	}
 	if err := srv.config.Storage.createRefreshToken(context.Background(), rtID, rt); err != nil {
 		t.Fatalf("failed to create refresh token: %v", err)
 	}
-
-	rtString := tok.UserToken()
 
 	// Fire concurrent requests
 	var wg sync.WaitGroup

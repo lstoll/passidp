@@ -2,7 +2,6 @@ package oauth2as
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -173,11 +172,11 @@ func TestListRefreshSessionsDPoPBound(t *testing.T) {
 	store := newTestStorage(t)
 	server := &Server{config: Config{Storage: store}, now: func() time.Time { return now }}
 
-	for id, state := range map[string]json.RawMessage{
-		"bound":   json.RawMessage(`{"dpopThumbprint":"abc"}`),
-		"empty":   json.RawMessage(`{"dpopThumbprint":""}`),
-		"unbound": json.RawMessage(`{}`),
-		"none":    nil,
+	for id, thumbprint := range map[string]string{
+		"bound":   "abc",
+		"empty":   "",
+		"unbound": "",
+		"none":    "",
 	} {
 		if err := store.commit(t.Context(), storageCommit{
 			Checks: []storageCheck{
@@ -185,12 +184,12 @@ func TestListRefreshSessionsDPoPBound(t *testing.T) {
 				{Kind: storageKindSession, ID: id},
 			},
 			Grants: []storedGrant{{
-				ID:              id,
-				UserID:          "user",
-				ClientID:        "client",
-				GrantedAt:       now,
-				ExpiresAt:       now.Add(time.Hour),
-				AdditionalState: state,
+				ID:             id,
+				UserID:         "user",
+				ClientID:       "client",
+				GrantedAt:      now,
+				ExpiresAt:      now.Add(time.Hour),
+				DPoPThumbprint: thumbprint,
 			}},
 			Sessions: []storedRefreshSession{{GrantID: id, UserID: "user", ClientID: "client", ExpiresAt: now.Add(time.Hour), LastUsedAt: now}},
 		}); err != nil {

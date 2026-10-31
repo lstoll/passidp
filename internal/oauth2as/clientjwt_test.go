@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-	"uuid"
 
 	"lds.li/oauth2ext/clientjwt"
 	"lds.li/oauth2ext/jwt"
@@ -240,30 +239,21 @@ func jwtClientCodeGrant(t *testing.T, store *Storage) string {
 		GrantedScopes: []string{oidc.ScopeOfflineAccess},
 		GrantedAt:     time.Now(),
 		ExpiresAt:     time.Now().Add(time.Minute),
-		Request: &AuthRequest{
-			ClientID:    "jwt-client",
-			RedirectURI: "https://redirect",
-			Scopes:      []string{oidc.ScopeOfflineAccess},
-		},
+		RedirectURI:   "https://redirect",
 	}
 	grantID, err := store.createGrant(t.Context(), grant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authCodeID := uuid.NewV4().String()
-	tok, err := token.New(tokenUsageAuthCode, authCodeID, grantID, grant.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rawToken, authCodeID := token.New(token.AuthorizationCode)
 	if err := store.createAuthCode(t.Context(), authCodeID, &storedAuthCode{
-		Code:             tok.Stored(),
 		GrantID:          grantID,
 		ValidUntil:       time.Now().Add(time.Minute),
 		StorageExpiresAt: time.Now().Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return tok.UserToken()
+	return rawToken
 }
 
 func jwtClientRefreshGrant(t *testing.T, store *Storage, clientID string) string {
@@ -279,18 +269,13 @@ func jwtClientRefreshGrant(t *testing.T, store *Storage, clientID string) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	refreshID := uuid.NewV4().String()
-	tok, err := token.New(tokenUsageRefresh, refreshID, grantID, grant.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rawToken, refreshID := token.New(token.RefreshToken)
 	if err := store.createRefreshToken(t.Context(), refreshID, &storedRefreshToken{
-		Token:            tok.Stored(),
 		GrantID:          grantID,
 		ValidUntil:       time.Now().Add(time.Hour),
 		StorageExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return tok.UserToken()
+	return rawToken
 }

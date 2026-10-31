@@ -18,7 +18,7 @@ require (
 	golang.org/x/term v0.45.0
 	golang.org/x/time v0.15.0
 	lds.li/keyset v0.0.0-20260907140947-33aea7d06e15
-	lds.li/oauth2ext v0.3.2-0.20261031185037-5c158c7e7c1e
+	lds.li/oauth2ext v0.3.2-0.20261031190059-0a7270f54131
 	lds.li/session v1.0.0-alpha.1.0.20260905212820-725ca8449331
 	lds.li/web v0.0.0-20260711155052-b5bda5b245fc
 	modernc.org/sqlite v1.58.0

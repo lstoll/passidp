@@ -160,15 +160,10 @@ func TestOAuth2ExtDPoPClientFlowAndRefresh(t *testing.T) {
 		t.Fatalf("UserInfo with initial token: %v", err)
 	}
 
-	credential, err := cache.Get(issuer, cacheKey)
-	if err != nil || credential == nil || credential.Token == nil || len(credential.DPoPKey) == 0 {
-		t.Fatalf("cached credential = %#v, %v", credential, err)
-	}
-	oldRefreshToken := credential.Token.RefreshToken
-	credential.Token.Expiry = time.Now().Add(-time.Minute)
-	if err := cache.Set(issuer, cacheKey, credential); err != nil {
-		t.Fatal(err)
-	}
+	// The memory store retains the returned token. Expire it without depending
+	// on the upstream cache's internal DPoP key namespace.
+	oldRefreshToken := first.RefreshToken
+	first.Expiry = time.Now().Add(-time.Minute)
 	refreshed, refreshedSigner, err := cacheSource.DPoPToken()
 	if err != nil {
 		t.Fatalf("refresh cached token: %v", err)

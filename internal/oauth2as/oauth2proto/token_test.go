@@ -281,6 +281,9 @@ func TestWriteTokenResponse(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			_ = WriteTokenResponse(w, tc.Resp)
+			if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Pragma") != "no-cache" {
+				t.Fatalf("token response permits caching: %v", w.Header())
+			}
 
 			if w.Result().StatusCode != 200 {
 				t.Errorf("want OK status, got %d", w.Result().StatusCode)

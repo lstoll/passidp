@@ -149,7 +149,9 @@ type TokenResponse struct {
 //
 // https://tools.ietf.org/html/rfc6749#section-5.1
 func WriteTokenResponse(w http.ResponseWriter, resp *TokenResponse) error {
-	w.Header().Add("Content-Type", "application/json;charset=UTF-8")
+	w.Header().Set("Content-Type", "application/json;charset=UTF-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 
 	respJSON := resp.ExtraParams
 	if respJSON == nil {

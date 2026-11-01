@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -20,9 +19,6 @@ func NewSessionKV(sqlDB *sql.DB) (*sqlkv.SqlKV, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-	if err := kv.CreateTable(context.Background()); err != nil {
-		return nil, fmt.Errorf("create session table: %w", err)
 	}
 	return kv, nil
 }

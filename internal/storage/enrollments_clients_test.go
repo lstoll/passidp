@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 	"uuid"
@@ -58,6 +59,48 @@ func TestEnrollmentStore(t *testing.T) {
 	_, err = store.GetPendingEnrollmentByID(enrollment.ID)
 	if err == nil {
 		t.Fatal("expected consumed enrollment to be deleted")
+	}
+}
+
+func TestConsumePendingEnrollmentExpired(t *testing.T) {
+	sqlDB := storage.OpenTest(t)
+	store := storage.NewEnrollmentStore(sqlDB)
+	enrollment, err := store.CreatePendingEnrollment(uuid.New(), storage.DefaultEnrollmentValidity)
+	if err != nil {
+		t.Fatalf("create enrollment: %v", err)
+	}
+	if _, err := sqlDB.Exec(`UPDATE pending_enrollments SET expires_at = ? WHERE id = ?`, time.Now().Add(-time.Second), enrollment.ID); err != nil {
+		t.Fatalf("backdate enrollment: %v", err)
+	}
+	if _, err := store.ConsumePendingEnrollment(enrollment.ID); err == nil || err.Error() != "enrollment expired" {
+		t.Fatalf("consume expired enrollment error = %v, want enrollment expired", err)
+	}
+}
+
+func TestConsumePendingEnrollmentConcurrent(t *testing.T) {
+	store := storage.NewEnrollmentStore(storage.OpenTest(t))
+	enrollment, err := store.CreatePendingEnrollment(uuid.New(), storage.DefaultEnrollmentValidity)
+	if err != nil {
+		t.Fatalf("create enrollment: %v", err)
+	}
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for range 2 {
+		wg.Go(func() {
+			_, err := store.ConsumePendingEnrollment(enrollment.ID)
+			results <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	wins := 0
+	for err := range results {
+		if err == nil {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("successful consumes = %d, want 1", wins)
 	}
 }
 

@@ -32,6 +32,12 @@ jobs:
         cache: false
       id: go
 
+    - name: Check generated SQL
+      run: |
+        go generate ./internal/storage
+        git diff --exit-code -- internal/storage/dbsql
+        test -z "$(git ls-files --others --exclude-standard internal/storage/dbsql)"
+
     - name: Test
       run: |
         go test ./...

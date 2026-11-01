@@ -3,12 +3,13 @@ package oauth2as
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"lds.li/passidp/internal/storage/dbsql"
 )
 
 // OAuth tables share a database with other PassIDP state.
@@ -38,117 +39,77 @@ func NewSQLStorage(db *sql.DB) (*Storage, error) {
 	return &Storage{db: db}, nil
 }
 
-func (s *Storage) conn(ctx context.Context) (*sql.Conn, error) {
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("enable SQLite foreign keys: %w", err)
-	}
-	return conn, nil
-}
-
 func timeFromMicros(value int64) time.Time { return time.UnixMicro(value).UTC() }
 
 func (s *Storage) getGrant(ctx context.Context, id string) (*storedGrant, error) {
-	conn, err := s.conn(ctx)
+	row, err := dbsql.New(s.db).GetOAuthGrant(ctx, id)
 	if err != nil {
+		return nil, storageReadError(err)
+	}
+	grant := &storedGrant{
+		ID: row.ID, UserID: row.UserID, ClientID: row.ClientID,
+		RedirectURI: row.RedirectUri, CodeChallenge: row.CodeChallenge,
+		Nonce: row.Nonce, DPoPThumbprint: row.DpopThumbprint,
+		GrantedAt: timeFromMicros(row.GrantedAt), AuthenticatedAt: nullableTime(row.AuthenticatedAt),
+		ExpiresAt: timeFromMicros(row.ExpiresAt), ACR: row.Acr, storageVersion: uint64(row.Version),
+	}
+	if row.MaxAge.Valid {
+		age := int(row.MaxAge.Int64)
+		grant.MaxAge = &age
+	}
+	if err := jsonv2.Unmarshal([]byte(row.GrantedScopes), &grant.GrantedScopes); err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	grant, version, err := s.scanGrant(ctx, conn, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
+	if err := jsonv2.Unmarshal([]byte(row.Amr), &grant.AMR); err != nil {
 		return nil, err
 	}
-	grant.ID = id
-	grant.storageVersion = version
-	return &grant, nil
+	return grant, nil
 }
 
 func (s *Storage) getAuthCode(ctx context.Context, id string) (*storedAuthCode, error) {
-	conn, err := s.conn(ctx)
+	row, err := dbsql.New(s.db).GetOAuthAuthCode(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, storageReadError(err)
 	}
-	defer conn.Close()
-	code, version, err := s.scanAuthCode(ctx, conn, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	code.ID = id
-	code.storageVersion = version
-	return &code, nil
+	return &storedAuthCode{ID: row.ID, GrantID: row.GrantID,
+		ValidUntil: timeFromMicros(row.ValidUntil), StorageExpiresAt: timeFromMicros(row.DeleteAfter),
+		storageVersion: uint64(row.Version)}, nil
 }
 
 func (s *Storage) getRefreshToken(ctx context.Context, id string) (*storedRefreshToken, error) {
-	conn, err := s.conn(ctx)
+	row, err := dbsql.New(s.db).GetOAuthRefreshToken(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, storageReadError(err)
 	}
-	defer conn.Close()
-	token, version, err := s.scanRefreshToken(ctx, conn, id)
+	return &storedRefreshToken{ID: row.ID, GrantID: row.GrantID,
+		ValidUntil: timeFromMicros(row.ValidUntil), StorageExpiresAt: timeFromMicros(row.DeleteAfter),
+		ReplacedByTokenID: row.ReplacedByID, storageVersion: uint64(row.Version)}, nil
+}
+
+func storageReadError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return ErrNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	token.ID = id
-	token.storageVersion = version
-	return &token, nil
+	return err
 }
 
-type sqlQueryer interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
+func nullableTime(value sql.NullInt64) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return timeFromMicros(value.Int64)
 }
 
-func (s *Storage) scanGrant(ctx context.Context, q sqlQueryer, id string) (storedGrant, uint64, error) {
-	var (
-		grant   storedGrant
-		version uint64
-	)
-	err := q.QueryRowContext(ctx, "SELECT user_id, client_id, granted_scopes, redirect_uri, code_challenge, nonce, max_age, granted_at, authenticated_at, expires_at, dpop_thumbprint, acr, amr, version FROM "+tblGrants+" WHERE id = ?", id).Scan(
-		&grant.UserID, &grant.ClientID, jsonArray(&grant.GrantedScopes), &grant.RedirectURI, &grant.CodeChallenge, &grant.Nonce, &grant.MaxAge,
-		s.timeOf(&grant.GrantedAt), s.nullTime(&grant.AuthenticatedAt), s.timeOf(&grant.ExpiresAt),
-		&grant.DPoPThumbprint,
-		&grant.ACR, jsonArray(&grant.AMR), &version,
-	)
-	if err != nil {
-		return storedGrant{}, 0, err
-	}
-	return grant, version, nil
+func nullTime(value time.Time) sql.NullInt64 {
+	return sql.NullInt64{Int64: value.UnixMicro(), Valid: !value.IsZero()}
 }
 
-func (s *Storage) scanAuthCode(ctx context.Context, q sqlQueryer, id string) (storedAuthCode, uint64, error) {
-	var (
-		code    storedAuthCode
-		version uint64
-	)
-	err := q.QueryRowContext(ctx, "SELECT grant_id, valid_until, delete_after, version FROM "+tblAuthCodes+" WHERE id = ?", id).Scan(&code.GrantID, s.timeOf(&code.ValidUntil), s.timeOf(&code.StorageExpiresAt), &version)
-	if err != nil {
-		return storedAuthCode{}, 0, err
+func jsonStrings(values []string) (string, error) {
+	if values == nil {
+		return "[]", nil
 	}
-	return code, version, nil
-}
-
-func (s *Storage) scanRefreshToken(ctx context.Context, q sqlQueryer, id string) (storedRefreshToken, uint64, error) {
-	var (
-		token   storedRefreshToken
-		version uint64
-	)
-	err := q.QueryRowContext(ctx, "SELECT grant_id, valid_until, delete_after, replaced_by_id, version FROM "+tblRefreshTokens+" WHERE id = ?", id).Scan(&token.GrantID, s.timeOf(&token.ValidUntil), s.timeOf(&token.StorageExpiresAt), &token.ReplacedByTokenID, &version)
-	if err != nil {
-		return storedRefreshToken{}, 0, err
-	}
-	return token, version, nil
+	data, err := jsonv2.Marshal(values)
+	return string(data), err
 }
 
 func (s *Storage) commit(ctx context.Context, commit storageCommit) error {
@@ -182,12 +143,7 @@ func (s *Storage) commit(ctx context.Context, commit storageCommit) error {
 }
 
 func (s *Storage) commitOnce(ctx context.Context, commit storageCommit) error {
-	conn, err := s.conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	tx, err := conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return err
 	}
@@ -298,283 +254,220 @@ func (s *Storage) putVersion(ctx context.Context, tx *sql.Tx, versions map[stora
 }
 
 func (s *Storage) version(ctx context.Context, tx *sql.Tx, ref storageRef) (uint64, bool, error) {
-	table, idColumn, err := s.tableForKind(ref.Kind)
-	if err != nil {
-		return 0, false, err
+	q := dbsql.New(tx)
+	var version int64
+	var err error
+	switch ref.Kind {
+	case storageKindGrant:
+		version, err = q.GetOAuthGrantVersion(ctx, ref.ID)
+	case storageKindAuthCode:
+		version, err = q.GetOAuthAuthCodeVersion(ctx, ref.ID)
+	case storageKindRefreshToken:
+		version, err = q.GetOAuthRefreshTokenVersion(ctx, ref.ID)
+	case storageKindSession:
+		version, err = q.GetOAuthRefreshSessionVersion(ctx, ref.ID)
+	default:
+		return 0, false, fmt.Errorf("oauth2as: unsupported storage kind %q", ref.Kind)
 	}
-	query := "SELECT version FROM " + table + " WHERE " + idColumn + " = ?"
-	var version uint64
-	err = tx.QueryRowContext(ctx, query, ref.ID).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
-	return version, err == nil, err
-}
-
-func (s *Storage) tableForKind(kind storageKind) (table, idColumn string, err error) {
-	switch kind {
-	case storageKindGrant:
-		return tblGrants, "id", nil
-	case storageKindAuthCode:
-		return tblAuthCodes, "id", nil
-	case storageKindRefreshToken:
-		return tblRefreshTokens, "id", nil
-	case storageKindSession:
-		return tblRefreshSessions, "grant_id", nil
-	default:
-		return "", "", fmt.Errorf("oauth2as: unsupported storage kind %q", kind)
-	}
+	return uint64(version), err == nil, err
 }
 
 func (s *Storage) putGrant(ctx context.Context, tx *sql.Tx, value storedGrant, version uint64, exists bool) error {
-	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblGrants+" (id, user_id, client_id, granted_scopes, redirect_uri, code_challenge, nonce, max_age, granted_at, authenticated_at, expires_at, dpop_thumbprint, acr, amr, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblGrants+" SET user_id = ?, client_id = ?, granted_scopes = ?, redirect_uri = ?, code_challenge = ?, nonce = ?, max_age = ?, granted_at = ?, authenticated_at = ?, expires_at = ?, dpop_thumbprint = ?, acr = ?, amr = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), value.RedirectURI, value.CodeChallenge, value.Nonce, value.MaxAge, s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt), s.timeOf(&value.ExpiresAt), value.DPoPThumbprint, value.ACR, jsonArray(&value.AMR), version},
-		[]any{value.UserID, value.ClientID, jsonArray(&value.GrantedScopes), value.RedirectURI, value.CodeChallenge, value.Nonce, value.MaxAge, s.timeOf(&value.GrantedAt), s.nullTime(&value.AuthenticatedAt), s.timeOf(&value.ExpiresAt), value.DPoPThumbprint, value.ACR, jsonArray(&value.AMR), version, value.ID})
-}
-
-func (s *Storage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
-	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblAuthCodes+" (id, grant_id, valid_until, delete_after, version) VALUES (?, ?, ?, ?, ?)",
-		"UPDATE "+tblAuthCodes+" SET grant_id = ?, valid_until = ?, delete_after = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version},
-		[]any{value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), version, value.ID})
-}
-
-func (s *Storage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
-	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblRefreshTokens+" (id, grant_id, valid_until, delete_after, replaced_by_id, version) VALUES (?, ?, ?, ?, ?, ?)",
-		"UPDATE "+tblRefreshTokens+" SET grant_id = ?, valid_until = ?, delete_after = ?, replaced_by_id = ?, version = ? WHERE id = ?",
-		[]any{value.ID, value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), value.ReplacedByTokenID, version},
-		[]any{value.GrantID, s.timeOf(&value.ValidUntil), s.timeOf(&value.StorageExpiresAt), value.ReplacedByTokenID, version, value.ID})
-}
-
-func (s *Storage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
-	return s.upsert(ctx, tx, exists,
-		"INSERT INTO "+tblRefreshSessions+" (grant_id, expires_at, last_used_at, version) VALUES (?, ?, ?, ?)",
-		"UPDATE "+tblRefreshSessions+" SET expires_at = ?, last_used_at = ?, version = ? WHERE grant_id = ?",
-		[]any{value.GrantID, s.timeOf(&value.ExpiresAt), s.timeOf(&value.LastUsedAt), version},
-		[]any{s.timeOf(&value.ExpiresAt), s.timeOf(&value.LastUsedAt), version, value.GrantID})
-}
-
-func (s *Storage) upsert(ctx context.Context, tx *sql.Tx, exists bool, insert, update string, insertArgs, updateArgs []any) error {
-	query, args := insert, insertArgs
-	if exists {
-		query, args = update, updateArgs
-	}
-	_, err := tx.ExecContext(ctx, query, args...)
-	return err
-}
-
-func (s *Storage) deleteRef(ctx context.Context, tx *sql.Tx, ref storageRef) error {
-	table, idColumn, err := s.tableForKind(ref.Kind)
+	q := dbsql.New(tx)
+	scopes, err := jsonStrings(value.GrantedScopes)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+idColumn+" = ?", ref.ID)
-	return err
+	amr, err := jsonStrings(value.AMR)
+	if err != nil {
+		return err
+	}
+	var age sql.NullInt64
+	if value.MaxAge != nil {
+		age = sql.NullInt64{Int64: int64(*value.MaxAge), Valid: true}
+	}
+	if exists {
+		return q.UpdateOAuthGrant(ctx, dbsql.UpdateOAuthGrantParams{
+			ID:              value.ID,
+			UserID:          value.UserID,
+			ClientID:        value.ClientID,
+			GrantedScopes:   scopes,
+			RedirectUri:     value.RedirectURI,
+			CodeChallenge:   value.CodeChallenge,
+			Nonce:           value.Nonce,
+			MaxAge:          age,
+			GrantedAt:       value.GrantedAt.UnixMicro(),
+			AuthenticatedAt: nullTime(value.AuthenticatedAt),
+			ExpiresAt:       value.ExpiresAt.UnixMicro(),
+			DpopThumbprint:  value.DPoPThumbprint,
+			Acr:             value.ACR,
+			Amr:             amr,
+			Version:         int64(version),
+		})
+	}
+	return q.InsertOAuthGrant(ctx, dbsql.InsertOAuthGrantParams{
+		ID:              value.ID,
+		UserID:          value.UserID,
+		ClientID:        value.ClientID,
+		GrantedScopes:   scopes,
+		RedirectUri:     value.RedirectURI,
+		CodeChallenge:   value.CodeChallenge,
+		Nonce:           value.Nonce,
+		MaxAge:          age,
+		GrantedAt:       value.GrantedAt.UnixMicro(),
+		AuthenticatedAt: nullTime(value.AuthenticatedAt),
+		ExpiresAt:       value.ExpiresAt.UnixMicro(),
+		DpopThumbprint:  value.DPoPThumbprint,
+		Acr:             value.ACR,
+		Amr:             amr,
+		Version:         int64(version),
+	})
+}
+
+func (s *Storage) putAuthCode(ctx context.Context, tx *sql.Tx, value storedAuthCode, version uint64, exists bool) error {
+	q := dbsql.New(tx)
+	if exists {
+		return q.UpdateOAuthAuthCode(ctx, dbsql.UpdateOAuthAuthCodeParams{
+			ID:          value.ID,
+			GrantID:     value.GrantID,
+			ValidUntil:  value.ValidUntil.UnixMicro(),
+			DeleteAfter: value.StorageExpiresAt.UnixMicro(),
+			Version:     int64(version),
+		})
+	}
+	return q.InsertOAuthAuthCode(ctx, dbsql.InsertOAuthAuthCodeParams{
+		ID:          value.ID,
+		GrantID:     value.GrantID,
+		ValidUntil:  value.ValidUntil.UnixMicro(),
+		DeleteAfter: value.StorageExpiresAt.UnixMicro(),
+		Version:     int64(version),
+	})
+}
+
+func (s *Storage) putRefreshToken(ctx context.Context, tx *sql.Tx, value storedRefreshToken, version uint64, exists bool) error {
+	q := dbsql.New(tx)
+	if exists {
+		return q.UpdateOAuthRefreshToken(ctx, dbsql.UpdateOAuthRefreshTokenParams{
+			ID:           value.ID,
+			GrantID:      value.GrantID,
+			ValidUntil:   value.ValidUntil.UnixMicro(),
+			DeleteAfter:  value.StorageExpiresAt.UnixMicro(),
+			ReplacedByID: value.ReplacedByTokenID,
+			Version:      int64(version),
+		})
+	}
+	return q.InsertOAuthRefreshToken(ctx, dbsql.InsertOAuthRefreshTokenParams{
+		ID:           value.ID,
+		GrantID:      value.GrantID,
+		ValidUntil:   value.ValidUntil.UnixMicro(),
+		DeleteAfter:  value.StorageExpiresAt.UnixMicro(),
+		ReplacedByID: value.ReplacedByTokenID,
+		Version:      int64(version),
+	})
+}
+
+func (s *Storage) putSession(ctx context.Context, tx *sql.Tx, value storedRefreshSession, version uint64, exists bool) error {
+	q := dbsql.New(tx)
+	if exists {
+		return q.UpdateOAuthRefreshSession(ctx, dbsql.UpdateOAuthRefreshSessionParams{
+			GrantID:    value.GrantID,
+			ExpiresAt:  value.ExpiresAt.UnixMicro(),
+			LastUsedAt: value.LastUsedAt.UnixMicro(),
+			Version:    int64(version),
+		})
+	}
+	return q.InsertOAuthRefreshSession(ctx, dbsql.InsertOAuthRefreshSessionParams{
+		GrantID:    value.GrantID,
+		ExpiresAt:  value.ExpiresAt.UnixMicro(),
+		LastUsedAt: value.LastUsedAt.UnixMicro(),
+		Version:    int64(version),
+	})
+}
+
+func (s *Storage) deleteRef(ctx context.Context, tx *sql.Tx, ref storageRef) error {
+	q := dbsql.New(tx)
+	switch ref.Kind {
+	case storageKindGrant:
+		return q.DeleteOAuthGrant(ctx, ref.ID)
+	case storageKindAuthCode:
+		return q.DeleteOAuthAuthCode(ctx, ref.ID)
+	case storageKindRefreshToken:
+		return q.DeleteOAuthRefreshToken(ctx, ref.ID)
+	case storageKindSession:
+		return q.DeleteOAuthRefreshSession(ctx, ref.ID)
+	default:
+		return fmt.Errorf("oauth2as: unsupported storage kind %q", ref.Kind)
+	}
 }
 
 func (s *Storage) listRefreshSessions(ctx context.Context, query storageRefreshSessionQuery) ([]storedRefreshSession, error) {
-	conn, err := s.conn(ctx)
+	rows, err := dbsql.New(s.db).ListOAuthRefreshSessions(ctx, dbsql.ListOAuthRefreshSessionsParams{
+		UserID: query.UserID, ClientID: query.ClientID, ActiveAt: query.ActiveAt.UnixMicro(),
+		AfterGrantID: query.AfterGrantID, AfterLastUsed: query.AfterLastUsed.UnixMicro(), MaxRows: int64(query.Limit),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-
-	statement := "SELECT rs.grant_id, g.user_id, g.client_id, g.granted_scopes, g.granted_at, g.authenticated_at, rs.expires_at, rs.last_used_at, g.dpop_thumbprint FROM " +
-		tblRefreshSessions + " rs JOIN " + tblGrants + " g ON g.id = rs.grant_id WHERE g.user_id = ? AND rs.expires_at > ?"
-	args := []any{query.UserID, s.timeOf(&query.ActiveAt)}
-	if query.ClientID != "" {
-		statement += " AND g.client_id = ?"
-		args = append(args, query.ClientID)
-	}
-	if query.AfterGrantID != "" {
-		statement += " AND (rs.last_used_at < ? OR (rs.last_used_at = ? AND rs.grant_id > ?))"
-		after := s.timeOf(&query.AfterLastUsed)
-		args = append(args, after, after, query.AfterGrantID)
-	}
-	statement += " ORDER BY rs.last_used_at DESC, rs.grant_id ASC LIMIT ?"
-	args = append(args, query.Limit)
-
-	rows, err := conn.QueryContext(ctx, statement, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := make([]storedRefreshSession, 0, query.Limit)
-	for rows.Next() {
-		var (
-			session    storedRefreshSession
-			thumbprint string
-		)
-		if err := rows.Scan(
-			&session.GrantID, &session.UserID, &session.ClientID, jsonArray(&session.GrantedScopes),
-			s.timeOf(&session.CreatedAt), s.nullTime(&session.AuthenticatedAt), s.timeOf(&session.ExpiresAt), s.timeOf(&session.LastUsedAt),
-			&thumbprint,
-		); err != nil {
+	result := make([]storedRefreshSession, 0, len(rows))
+	for _, row := range rows {
+		session := storedRefreshSession{GrantID: row.GrantID, UserID: row.UserID, ClientID: row.ClientID,
+			CreatedAt: timeFromMicros(row.GrantedAt), AuthenticatedAt: nullableTime(row.AuthenticatedAt),
+			ExpiresAt: timeFromMicros(row.ExpiresAt), LastUsedAt: timeFromMicros(row.LastUsedAt), DPoPBound: row.DpopThumbprint != ""}
+		if err := jsonv2.Unmarshal([]byte(row.GrantedScopes), &session.GrantedScopes); err != nil {
 			return nil, err
 		}
-		session.DPoPBound = thumbprint != ""
-		grant := storedGrant{AuthenticatedAt: session.AuthenticatedAt, GrantedAt: session.CreatedAt}
-		session.AuthenticatedAt = authTimeFromGrant(&grant)
+		if session.AuthenticatedAt.IsZero() {
+			session.AuthenticatedAt = session.CreatedAt
+		}
 		result = append(result, session)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return result, nil
 }
 
 func (s *Storage) cleanup(ctx context.Context, options CleanupOptions) (CleanupResult, error) {
-	conn, err := s.conn(ctx)
-	if err != nil {
-		return CleanupResult{}, err
-	}
-	defer conn.Close()
-	tx, err := conn.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CleanupResult{}, err
 	}
 	defer tx.Rollback()
-	cutoff := s.timeOf(&options.Before)
-	deleted := 0
-	remaining := options.Limit
-	for _, target := range []struct {
-		table, id, expiry string
-	}{
-		{tblRefreshSessions, "grant_id", "expires_at"},
-		{tblAuthCodes, "id", "delete_after"},
-		{tblRefreshTokens, "id", "delete_after"},
-		{tblGrants, "id", "expires_at"},
-	} {
+	q := dbsql.New(tx)
+	cutoff := options.Before.UnixMicro()
+	deleted := int64(0)
+	remaining := int64(options.Limit)
+	cleanups := []func(int64) (int64, error){
+		func(limit int64) (int64, error) {
+			return q.CleanupOAuthRefreshSessions(ctx, dbsql.CleanupOAuthRefreshSessionsParams{Cutoff: cutoff, MaxRows: limit})
+		},
+		func(limit int64) (int64, error) {
+			return q.CleanupOAuthAuthCodes(ctx, dbsql.CleanupOAuthAuthCodesParams{Cutoff: cutoff, MaxRows: limit})
+		},
+		func(limit int64) (int64, error) {
+			return q.CleanupOAuthRefreshTokens(ctx, dbsql.CleanupOAuthRefreshTokensParams{Cutoff: cutoff, MaxRows: limit})
+		},
+		func(limit int64) (int64, error) {
+			return q.CleanupOAuthGrants(ctx, dbsql.CleanupOAuthGrantsParams{Cutoff: cutoff, MaxRows: limit})
+		},
+	}
+	for _, cleanup := range cleanups {
 		if remaining == 0 {
 			break
 		}
-		query := "DELETE FROM " + target.table + " WHERE " + target.id + " IN (SELECT " + target.id +
-			" FROM " + target.table + " WHERE " + target.expiry + " <= ? ORDER BY " + target.expiry + " LIMIT ?)"
-		result, err := tx.ExecContext(ctx, query, cutoff, remaining)
+		count, err := cleanup(remaining)
 		if err != nil {
 			return CleanupResult{}, err
 		}
-		count, err := result.RowsAffected()
-		if err != nil {
-			return CleanupResult{}, err
-		}
-		deleted += int(count)
-		remaining -= int(count)
+		deleted += count
+		remaining -= count
 	}
-	more, err := s.hasExpired(ctx, tx, cutoff)
+	more, err := q.HasExpiredOAuthRecords(ctx, cutoff)
 	if err != nil {
 		return CleanupResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return CleanupResult{}, err
 	}
-	return CleanupResult{Deleted: deleted, More: more}, nil
-}
-
-func (s *Storage) hasExpired(ctx context.Context, tx *sql.Tx, cutoff any) (bool, error) {
-	query := "SELECT EXISTS (" +
-		"SELECT 1 FROM " + tblRefreshSessions + " WHERE expires_at <= ? " +
-		"UNION ALL SELECT 1 FROM " + tblAuthCodes + " WHERE delete_after <= ? " +
-		"UNION ALL SELECT 1 FROM " + tblRefreshTokens + " WHERE delete_after <= ? " +
-		"UNION ALL SELECT 1 FROM " + tblGrants + " WHERE expires_at <= ?" +
-		")"
-	var exists bool
-	err := tx.QueryRowContext(ctx, query, cutoff, cutoff, cutoff, cutoff).Scan(&exists)
-	return exists, err
-}
-
-func jsonArray[T any](v *T) *sqlJSON[T] {
-	return &sqlJSON[T]{v: v, emptyArray: true}
-}
-
-func (s *Storage) timeOf(t *time.Time) *sqlTime {
-	return &sqlTime{t: t}
-}
-
-func (s *Storage) nullTime(t *time.Time) *sqlTime {
-	return &sqlTime{t: t, nullable: true}
-}
-
-type sqlJSON[T any] struct {
-	v          *T
-	emptyArray bool
-}
-
-func (j *sqlJSON[T]) Scan(src any) error {
-	if j == nil || j.v == nil {
-		return fmt.Errorf("oauth2as: json scan into nil")
-	}
-	if src == nil {
-		var zero T
-		*j.v = zero
-		return nil
-	}
-	var data []byte
-	switch v := src.(type) {
-	case []byte:
-		data = v
-	case string:
-		data = []byte(v)
-	default:
-		return fmt.Errorf("oauth2as: unsupported json type %T", src)
-	}
-	if len(data) == 0 || string(data) == "null" {
-		var zero T
-		*j.v = zero
-		return nil
-	}
-	return jsonv2.Unmarshal(data, j.v)
-}
-
-func (j *sqlJSON[T]) Value() (driver.Value, error) {
-	if j == nil || j.v == nil {
-		return j.emptyValue(), nil
-	}
-	data, err := jsonv2.Marshal(*j.v)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 || string(data) == "null" {
-		return j.emptyValue(), nil
-	}
-	return string(data), nil
-}
-
-func (j *sqlJSON[T]) emptyValue() driver.Value {
-	if j != nil && j.emptyArray {
-		return "[]"
-	}
-	return nil
-}
-
-type sqlTime struct {
-	t        *time.Time
-	nullable bool
-}
-
-func (t *sqlTime) Scan(src any) error {
-	if t == nil || t.t == nil {
-		return fmt.Errorf("oauth2as: time scan into nil")
-	}
-	if src == nil {
-		*t.t = time.Time{}
-		return nil
-	}
-	value, ok := src.(int64)
-	if !ok {
-		return fmt.Errorf("oauth2as: unsupported time type %T", src)
-	}
-	*t.t = time.UnixMicro(value).UTC()
-	return nil
-}
-
-func (t *sqlTime) Value() (driver.Value, error) {
-	if t == nil || t.t == nil || (t.nullable && t.t.IsZero()) {
-		return nil, nil
-	}
-	return t.t.UnixMicro(), nil
+	return CleanupResult{Deleted: int(deleted), More: more}, nil
 }

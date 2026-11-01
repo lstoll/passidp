@@ -98,6 +98,15 @@ Open the enrollment URL, name the key, and register a passkey. The server must b
 
 ## Development
 
+SQL queries live in `internal/storage/queries`. sqlc reads the numbered migrations
+and migration-runner bootstrap schema in `internal/storage/migrations` directly;
+there is no separate schema snapshot to maintain. After changing queries or
+migrations, run `go generate ./internal/storage` and commit the generated
+`internal/storage/dbsql` package. The generator version is pinned in the directive.
+
+Session and keyset persistence use their library adapters; their tables are
+created by the application migrations.
+
 ### Run E2E Tests
 
 ```bash

@@ -8,19 +8,20 @@ import (
 	"time"
 
 	"lds.li/oauth2ext/dpop"
+	"lds.li/passidp/internal/storage/dbsql"
 )
 
 // DPoPReplayStore records accepted DPoP proofs in SQLite so replay checks
 // survive process restarts and work across replicas sharing the database.
 type DPoPReplayStore struct {
-	db *sql.DB
+	queries *dbsql.Queries
 }
 
 var _ dpop.ReplayStore = (*DPoPReplayStore)(nil)
 
 // NewDPoPReplayStore returns a SQL-backed DPoP replay store.
 func NewDPoPReplayStore(sqlDB *sql.DB) *DPoPReplayStore {
-	return &DPoPReplayStore{db: sqlDB}
+	return &DPoPReplayStore{queries: dbsql.New(sqlDB)}
 }
 
 // CheckAndRecord atomically records a verified DPoP proof until its acceptance
@@ -32,32 +33,28 @@ func (s *DPoPReplayStore) CheckAndRecord(ctx context.Context, thumbprint, jti st
 	}
 	key := dpopReplayKey(thumbprint, jti)
 	now := time.Now()
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO dpop_replay (proof_key, until)
-		VALUES (?, ?)
-		ON CONFLICT(proof_key) DO UPDATE SET until = excluded.until
-		WHERE dpop_replay.until < ?`,
-		key[:], until, now)
-	if err != nil {
-		return fmt.Errorf("record dpop proof: %w", err)
-	}
-	rows, err := result.RowsAffected()
+	rows, err := s.queries.InsertDPoPProof(ctx, dbsql.InsertDPoPProofParams{
+		ProofKey: key[:], Until: until,
+	})
 	if err != nil {
 		return fmt.Errorf("record dpop proof: %w", err)
 	}
 	if rows == 0 {
-		return dpop.ErrProofReplay
+		rows, err = s.queries.RefreshExpiredDPoPProof(ctx, dbsql.RefreshExpiredDPoPProofParams{
+			Until: until, ProofKey: key[:], Cutoff: now,
+		})
+		if err != nil {
+			return fmt.Errorf("record dpop proof: %w", err)
+		}
+		if rows == 0 {
+			return dpop.ErrProofReplay
+		}
 	}
 	return nil
 }
 
 func (s *DPoPReplayStore) GarbageCollectExpiredProofs() (int, error) {
-	result, err := s.db.ExecContext(context.Background(), `
-		DELETE FROM dpop_replay WHERE until < ?`, time.Now())
-	if err != nil {
-		return 0, fmt.Errorf("delete expired dpop proofs: %w", err)
-	}
-	deleted, err := result.RowsAffected()
+	deleted, err := s.queries.GarbageCollectDPoPProofs(context.Background(), time.Now())
 	if err != nil {
 		return 0, fmt.Errorf("delete expired dpop proofs: %w", err)
 	}

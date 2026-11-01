@@ -22,7 +22,7 @@ func testStorage(t *testing.T, factory func(t *testing.T) *Storage) {
 
 	t.Run("CreateAndGet", func(t *testing.T) {
 		store := factory(t)
-		expires := time.Now().Add(time.Hour).Round(0)
+		expires := time.Now().Add(time.Hour).Truncate(time.Microsecond)
 		if err := store.commit(ctx, storageCommit{
 			Checks: []storageCheck{{Kind: storageKindGrant, ID: "g1"}},
 			Grants: []storedGrant{{ID: "g1", UserID: "user", ClientID: "client", GrantedScopes: []string{"openid"}, ExpiresAt: expires}},

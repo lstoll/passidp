@@ -87,7 +87,7 @@ func TestListRefreshSessions(t *testing.T) {
 func TestCodeExchangeCreatesRefreshSession(t *testing.T) {
 	store := newTestStorage(t)
 	signer, verifier := testSignerVerifier(t)
-	currentTime := time.Now()
+	currentTime := time.Now().Truncate(time.Microsecond)
 	server := &Server{
 		config: Config{
 			Issuer:               "https://issuer",

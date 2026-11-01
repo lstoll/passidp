@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,6 +278,25 @@ func tokenForm(grantType, credential string) url.Values {
 
 func raceToken(t *testing.T, server *Server, form url.Values, signer *jwt.SigningIdentity, name string) map[string]any {
 	t.Helper()
+	// Both requests must load the same storage versions before either commits.
+	// Otherwise a later refresh may legitimately succeed within the grace period.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	ready := make(chan struct{})
+	var arrivals atomic.Int32
+	handler := server.config.TokenHandler
+	server.config.TokenHandler = func(requestCtx context.Context, request *TokenRequest) (*TokenResponse, error) {
+		if arrivals.Add(1) == 2 {
+			close(ready)
+		}
+		select {
+		case <-ready:
+			return handler(requestCtx, request)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	defer func() { server.config.TokenHandler = handler }()
 	type tokenResult struct {
 		status int
 		body   map[string]any
@@ -288,10 +308,10 @@ func raceToken(t *testing.T, server *Server, form url.Values, signer *jwt.Signin
 			results <- tokenResult{status: status, body: body}
 		}()
 	}
+	completed := []tokenResult{<-results, <-results}
 	var winner map[string]any
 	successes, failures := 0, 0
-	for range 2 {
-		result := <-results
+	for _, result := range completed {
 		if result.status == http.StatusOK {
 			successes++
 			winner = result.body

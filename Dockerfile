@@ -1,4 +1,6 @@
-FROM golang:1-trixie AS build
+FROM golang:1-alpine AS build
+
+RUN apk add --no-cache git
 
 WORKDIR /src
 

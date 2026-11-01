@@ -155,8 +155,7 @@ func TestCodeToken(t *testing.T) {
 			t.Fatal(err)
 		}
 		code.ValidUntil = time.Now().Add(-time.Second)
-		if err := o.config.Storage.commit(t.Context(), storageCommit{
-			Checks:    []storageCheck{{Kind: storageKindAuthCode, ID: code.ID, Version: code.storageVersion}},
+		if err := o.config.Storage.seed(t.Context(), storageFixtures{
 			AuthCodes: []storedAuthCode{*code},
 		}); err != nil {
 			t.Fatal(err)

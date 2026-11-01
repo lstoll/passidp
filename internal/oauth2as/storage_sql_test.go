@@ -345,10 +345,3 @@ func TestSQLStorageConstructorValidation(t *testing.T) {
 		t.Fatal("nil database accepted")
 	}
 }
-
-func TestSQLiteStorageConformance(t *testing.T) {
-	testStorage(t, func(t *testing.T) *Storage {
-		_, store := newMigratedSQLStorage(t)
-		return store
-	})
-}

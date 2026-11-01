@@ -40,12 +40,7 @@ func TestSQLiteStorageRoundTripsTypedGrant(t *testing.T) {
 		ExpiresAt:  grant.ExpiresAt,
 		LastUsedAt: base.Add(2 * time.Second),
 	}
-	if err := store.commit(t.Context(), storageCommit{
-		Checks: []storageCheck{
-			{Kind: storageKindGrant, ID: grant.ID},
-			{Kind: storageKindGrant, ID: emptyOptional.ID},
-			{Kind: storageKindSession, ID: grant.ID},
-		},
+	if err := store.seed(t.Context(), storageFixtures{
 		Grants:   []storedGrant{grant, emptyOptional},
 		Sessions: []storedRefreshSession{session},
 	}); err != nil {

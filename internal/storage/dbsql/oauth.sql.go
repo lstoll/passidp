@@ -10,6 +10,26 @@ import (
 	"database/sql"
 )
 
+const advanceOAuthGrantRevision = `-- name: AdvanceOAuthGrantRevision :execrows
+UPDATE oauth2as_grants
+SET dpop_thumbprint = ?1, version = version + 1
+WHERE id = ?2 AND version = ?3
+`
+
+type AdvanceOAuthGrantRevisionParams struct {
+	DpopThumbprint string
+	ID             string
+	Version        int64
+}
+
+func (q *Queries) AdvanceOAuthGrantRevision(ctx context.Context, arg AdvanceOAuthGrantRevisionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, advanceOAuthGrantRevision, arg.DpopThumbprint, arg.ID, arg.Version)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const cleanupOAuthAuthCodes = `-- name: CleanupOAuthAuthCodes :execrows
 DELETE FROM oauth2as_authorization_codes WHERE id IN (
  SELECT oauth2as_authorization_codes.id FROM oauth2as_authorization_codes WHERE oauth2as_authorization_codes.delete_after <= ?1
@@ -90,13 +110,21 @@ func (q *Queries) CleanupOAuthRefreshTokens(ctx context.Context, arg CleanupOAut
 	return result.RowsAffected()
 }
 
-const deleteOAuthAuthCode = `-- name: DeleteOAuthAuthCode :exec
-DELETE FROM oauth2as_authorization_codes WHERE id = ?
+const consumeOAuthAuthCode = `-- name: ConsumeOAuthAuthCode :execrows
+DELETE FROM oauth2as_authorization_codes WHERE id = ?1 AND grant_id = ?2
 `
 
-func (q *Queries) DeleteOAuthAuthCode(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteOAuthAuthCode, id)
-	return err
+type ConsumeOAuthAuthCodeParams struct {
+	ID      string
+	GrantID string
+}
+
+func (q *Queries) ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumeOAuthAuthCode, arg.ID, arg.GrantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteOAuthGrant = `-- name: DeleteOAuthGrant :exec
@@ -126,32 +154,42 @@ func (q *Queries) DeleteOAuthRefreshToken(ctx context.Context, id string) error 
 	return err
 }
 
-const getOAuthAuthCode = `-- name: GetOAuthAuthCode :one
-SELECT id, grant_id, valid_until, delete_after, version FROM oauth2as_authorization_codes WHERE id = ?
+const getOAuthAuthCodeAndGrant = `-- name: GetOAuthAuthCodeAndGrant :one
+SELECT c.id, c.grant_id, c.valid_until, c.delete_after, g.id, g.user_id, g.client_id, g.granted_scopes, g.redirect_uri, g.code_challenge, g.nonce, g.max_age, g.granted_at, g.authenticated_at, g.expires_at, g.dpop_thumbprint, g.acr, g.amr, g.version
+FROM oauth2as_authorization_codes c JOIN oauth2as_grants g ON g.id = c.grant_id
+WHERE c.id = ?
 `
 
-func (q *Queries) GetOAuthAuthCode(ctx context.Context, id string) (Oauth2asAuthorizationCode, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthAuthCode, id)
-	var i Oauth2asAuthorizationCode
-	err := row.Scan(
-		&i.ID,
-		&i.GrantID,
-		&i.ValidUntil,
-		&i.DeleteAfter,
-		&i.Version,
-	)
-	return i, err
+type GetOAuthAuthCodeAndGrantRow struct {
+	Oauth2asAuthorizationCode Oauth2asAuthorizationCode
+	Oauth2asGrant             Oauth2asGrant
 }
 
-const getOAuthAuthCodeVersion = `-- name: GetOAuthAuthCodeVersion :one
-SELECT version FROM oauth2as_authorization_codes WHERE id = ?
-`
-
-func (q *Queries) GetOAuthAuthCodeVersion(ctx context.Context, id string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthAuthCodeVersion, id)
-	var version int64
-	err := row.Scan(&version)
-	return version, err
+func (q *Queries) GetOAuthAuthCodeAndGrant(ctx context.Context, id string) (GetOAuthAuthCodeAndGrantRow, error) {
+	row := q.db.QueryRowContext(ctx, getOAuthAuthCodeAndGrant, id)
+	var i GetOAuthAuthCodeAndGrantRow
+	err := row.Scan(
+		&i.Oauth2asAuthorizationCode.ID,
+		&i.Oauth2asAuthorizationCode.GrantID,
+		&i.Oauth2asAuthorizationCode.ValidUntil,
+		&i.Oauth2asAuthorizationCode.DeleteAfter,
+		&i.Oauth2asGrant.ID,
+		&i.Oauth2asGrant.UserID,
+		&i.Oauth2asGrant.ClientID,
+		&i.Oauth2asGrant.GrantedScopes,
+		&i.Oauth2asGrant.RedirectUri,
+		&i.Oauth2asGrant.CodeChallenge,
+		&i.Oauth2asGrant.Nonce,
+		&i.Oauth2asGrant.MaxAge,
+		&i.Oauth2asGrant.GrantedAt,
+		&i.Oauth2asGrant.AuthenticatedAt,
+		&i.Oauth2asGrant.ExpiresAt,
+		&i.Oauth2asGrant.DpopThumbprint,
+		&i.Oauth2asGrant.Acr,
+		&i.Oauth2asGrant.Amr,
+		&i.Oauth2asGrant.Version,
+	)
+	return i, err
 }
 
 const getOAuthGrant = `-- name: GetOAuthGrant :one
@@ -181,71 +219,43 @@ func (q *Queries) GetOAuthGrant(ctx context.Context, id string) (Oauth2asGrant, 
 	return i, err
 }
 
-const getOAuthGrantVersion = `-- name: GetOAuthGrantVersion :one
-SELECT version FROM oauth2as_grants WHERE id = ?
+const getOAuthRefreshTokenAndGrant = `-- name: GetOAuthRefreshTokenAndGrant :one
+SELECT t.id, t.grant_id, t.valid_until, t.delete_after, t.replaced_by_id, g.id, g.user_id, g.client_id, g.granted_scopes, g.redirect_uri, g.code_challenge, g.nonce, g.max_age, g.granted_at, g.authenticated_at, g.expires_at, g.dpop_thumbprint, g.acr, g.amr, g.version
+FROM oauth2as_refresh_tokens t JOIN oauth2as_grants g ON g.id = t.grant_id
+WHERE t.id = ?
 `
 
-func (q *Queries) GetOAuthGrantVersion(ctx context.Context, id string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthGrantVersion, id)
-	var version int64
-	err := row.Scan(&version)
-	return version, err
+type GetOAuthRefreshTokenAndGrantRow struct {
+	Oauth2asRefreshToken Oauth2asRefreshToken
+	Oauth2asGrant        Oauth2asGrant
 }
 
-const getOAuthRefreshSession = `-- name: GetOAuthRefreshSession :one
-SELECT grant_id, expires_at, last_used_at, version FROM oauth2as_refresh_sessions WHERE grant_id = ?
-`
-
-func (q *Queries) GetOAuthRefreshSession(ctx context.Context, grantID string) (Oauth2asRefreshSession, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthRefreshSession, grantID)
-	var i Oauth2asRefreshSession
+func (q *Queries) GetOAuthRefreshTokenAndGrant(ctx context.Context, id string) (GetOAuthRefreshTokenAndGrantRow, error) {
+	row := q.db.QueryRowContext(ctx, getOAuthRefreshTokenAndGrant, id)
+	var i GetOAuthRefreshTokenAndGrantRow
 	err := row.Scan(
-		&i.GrantID,
-		&i.ExpiresAt,
-		&i.LastUsedAt,
-		&i.Version,
+		&i.Oauth2asRefreshToken.ID,
+		&i.Oauth2asRefreshToken.GrantID,
+		&i.Oauth2asRefreshToken.ValidUntil,
+		&i.Oauth2asRefreshToken.DeleteAfter,
+		&i.Oauth2asRefreshToken.ReplacedByID,
+		&i.Oauth2asGrant.ID,
+		&i.Oauth2asGrant.UserID,
+		&i.Oauth2asGrant.ClientID,
+		&i.Oauth2asGrant.GrantedScopes,
+		&i.Oauth2asGrant.RedirectUri,
+		&i.Oauth2asGrant.CodeChallenge,
+		&i.Oauth2asGrant.Nonce,
+		&i.Oauth2asGrant.MaxAge,
+		&i.Oauth2asGrant.GrantedAt,
+		&i.Oauth2asGrant.AuthenticatedAt,
+		&i.Oauth2asGrant.ExpiresAt,
+		&i.Oauth2asGrant.DpopThumbprint,
+		&i.Oauth2asGrant.Acr,
+		&i.Oauth2asGrant.Amr,
+		&i.Oauth2asGrant.Version,
 	)
 	return i, err
-}
-
-const getOAuthRefreshSessionVersion = `-- name: GetOAuthRefreshSessionVersion :one
-SELECT version FROM oauth2as_refresh_sessions WHERE grant_id = ?
-`
-
-func (q *Queries) GetOAuthRefreshSessionVersion(ctx context.Context, grantID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthRefreshSessionVersion, grantID)
-	var version int64
-	err := row.Scan(&version)
-	return version, err
-}
-
-const getOAuthRefreshToken = `-- name: GetOAuthRefreshToken :one
-SELECT id, grant_id, valid_until, delete_after, replaced_by_id, version FROM oauth2as_refresh_tokens WHERE id = ?
-`
-
-func (q *Queries) GetOAuthRefreshToken(ctx context.Context, id string) (Oauth2asRefreshToken, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthRefreshToken, id)
-	var i Oauth2asRefreshToken
-	err := row.Scan(
-		&i.ID,
-		&i.GrantID,
-		&i.ValidUntil,
-		&i.DeleteAfter,
-		&i.ReplacedByID,
-		&i.Version,
-	)
-	return i, err
-}
-
-const getOAuthRefreshTokenVersion = `-- name: GetOAuthRefreshTokenVersion :one
-SELECT version FROM oauth2as_refresh_tokens WHERE id = ?
-`
-
-func (q *Queries) GetOAuthRefreshTokenVersion(ctx context.Context, id string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthRefreshTokenVersion, id)
-	var version int64
-	err := row.Scan(&version)
-	return version, err
 }
 
 const hasExpiredOAuthRecords = `-- name: HasExpiredOAuthRecords :one
@@ -265,8 +275,8 @@ func (q *Queries) HasExpiredOAuthRecords(ctx context.Context, cutoff int64) (boo
 }
 
 const insertOAuthAuthCode = `-- name: InsertOAuthAuthCode :exec
-INSERT INTO oauth2as_authorization_codes (id, grant_id, valid_until, delete_after, version)
-VALUES (?1, ?2, ?3, ?4, ?5)
+INSERT INTO oauth2as_authorization_codes (id, grant_id, valid_until, delete_after)
+VALUES (?1, ?2, ?3, ?4)
 `
 
 type InsertOAuthAuthCodeParams struct {
@@ -274,7 +284,6 @@ type InsertOAuthAuthCodeParams struct {
 	GrantID     string
 	ValidUntil  int64
 	DeleteAfter int64
-	Version     int64
 }
 
 func (q *Queries) InsertOAuthAuthCode(ctx context.Context, arg InsertOAuthAuthCodeParams) error {
@@ -283,7 +292,6 @@ func (q *Queries) InsertOAuthAuthCode(ctx context.Context, arg InsertOAuthAuthCo
 		arg.GrantID,
 		arg.ValidUntil,
 		arg.DeleteAfter,
-		arg.Version,
 	)
 	return err
 }
@@ -332,31 +340,9 @@ func (q *Queries) InsertOAuthGrant(ctx context.Context, arg InsertOAuthGrantPara
 	return err
 }
 
-const insertOAuthRefreshSession = `-- name: InsertOAuthRefreshSession :exec
-INSERT INTO oauth2as_refresh_sessions (grant_id, expires_at, last_used_at, version)
-VALUES (?1, ?2, ?3, ?4)
-`
-
-type InsertOAuthRefreshSessionParams struct {
-	GrantID    string
-	ExpiresAt  int64
-	LastUsedAt int64
-	Version    int64
-}
-
-func (q *Queries) InsertOAuthRefreshSession(ctx context.Context, arg InsertOAuthRefreshSessionParams) error {
-	_, err := q.db.ExecContext(ctx, insertOAuthRefreshSession,
-		arg.GrantID,
-		arg.ExpiresAt,
-		arg.LastUsedAt,
-		arg.Version,
-	)
-	return err
-}
-
 const insertOAuthRefreshToken = `-- name: InsertOAuthRefreshToken :exec
-INSERT INTO oauth2as_refresh_tokens (id, grant_id, valid_until, delete_after, replaced_by_id, version)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+INSERT INTO oauth2as_refresh_tokens (id, grant_id, valid_until, delete_after, replaced_by_id)
+VALUES (?1, ?2, ?3, ?4, ?5)
 `
 
 type InsertOAuthRefreshTokenParams struct {
@@ -365,7 +351,6 @@ type InsertOAuthRefreshTokenParams struct {
 	ValidUntil   int64
 	DeleteAfter  int64
 	ReplacedByID string
-	Version      int64
 }
 
 func (q *Queries) InsertOAuthRefreshToken(ctx context.Context, arg InsertOAuthRefreshTokenParams) error {
@@ -375,7 +360,6 @@ func (q *Queries) InsertOAuthRefreshToken(ctx context.Context, arg InsertOAuthRe
 		arg.ValidUntil,
 		arg.DeleteAfter,
 		arg.ReplacedByID,
-		arg.Version,
 	)
 	return err
 }
@@ -452,99 +436,26 @@ func (q *Queries) ListOAuthRefreshSessions(ctx context.Context, arg ListOAuthRef
 	return items, nil
 }
 
-const updateOAuthAuthCode = `-- name: UpdateOAuthAuthCode :exec
-UPDATE oauth2as_authorization_codes SET grant_id = ?1, valid_until = ?2, delete_after = ?3, version = ?4
+const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :execrows
+DELETE FROM oauth2as_grants WHERE id = ?1 AND user_id = ?2
+`
+
+type RevokeOAuthGrantForUserParams struct {
+	ID     string
+	UserID string
+}
+
+func (q *Queries) RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeOAuthGrantForUser, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateOAuthRefreshToken = `-- name: UpdateOAuthRefreshToken :execrows
+UPDATE oauth2as_refresh_tokens SET grant_id = ?1, valid_until = ?2, delete_after = ?3, replaced_by_id = ?4
 WHERE id = ?5
-`
-
-type UpdateOAuthAuthCodeParams struct {
-	GrantID     string
-	ValidUntil  int64
-	DeleteAfter int64
-	Version     int64
-	ID          string
-}
-
-func (q *Queries) UpdateOAuthAuthCode(ctx context.Context, arg UpdateOAuthAuthCodeParams) error {
-	_, err := q.db.ExecContext(ctx, updateOAuthAuthCode,
-		arg.GrantID,
-		arg.ValidUntil,
-		arg.DeleteAfter,
-		arg.Version,
-		arg.ID,
-	)
-	return err
-}
-
-const updateOAuthGrant = `-- name: UpdateOAuthGrant :exec
-UPDATE oauth2as_grants SET user_id = ?1, client_id = ?2, granted_scopes = ?3, redirect_uri = ?4, code_challenge = ?5, nonce = ?6, max_age = ?7, granted_at = ?8, authenticated_at = ?9, expires_at = ?10, dpop_thumbprint = ?11, acr = ?12, amr = ?13, version = ?14
-WHERE id = ?15
-`
-
-type UpdateOAuthGrantParams struct {
-	UserID          string
-	ClientID        string
-	GrantedScopes   string
-	RedirectUri     string
-	CodeChallenge   string
-	Nonce           string
-	MaxAge          sql.NullInt64
-	GrantedAt       int64
-	AuthenticatedAt sql.NullInt64
-	ExpiresAt       int64
-	DpopThumbprint  string
-	Acr             string
-	Amr             string
-	Version         int64
-	ID              string
-}
-
-func (q *Queries) UpdateOAuthGrant(ctx context.Context, arg UpdateOAuthGrantParams) error {
-	_, err := q.db.ExecContext(ctx, updateOAuthGrant,
-		arg.UserID,
-		arg.ClientID,
-		arg.GrantedScopes,
-		arg.RedirectUri,
-		arg.CodeChallenge,
-		arg.Nonce,
-		arg.MaxAge,
-		arg.GrantedAt,
-		arg.AuthenticatedAt,
-		arg.ExpiresAt,
-		arg.DpopThumbprint,
-		arg.Acr,
-		arg.Amr,
-		arg.Version,
-		arg.ID,
-	)
-	return err
-}
-
-const updateOAuthRefreshSession = `-- name: UpdateOAuthRefreshSession :exec
-UPDATE oauth2as_refresh_sessions SET expires_at = ?1, last_used_at = ?2, version = ?3
-WHERE grant_id = ?4
-`
-
-type UpdateOAuthRefreshSessionParams struct {
-	ExpiresAt  int64
-	LastUsedAt int64
-	Version    int64
-	GrantID    string
-}
-
-func (q *Queries) UpdateOAuthRefreshSession(ctx context.Context, arg UpdateOAuthRefreshSessionParams) error {
-	_, err := q.db.ExecContext(ctx, updateOAuthRefreshSession,
-		arg.ExpiresAt,
-		arg.LastUsedAt,
-		arg.Version,
-		arg.GrantID,
-	)
-	return err
-}
-
-const updateOAuthRefreshToken = `-- name: UpdateOAuthRefreshToken :exec
-UPDATE oauth2as_refresh_tokens SET grant_id = ?1, valid_until = ?2, delete_after = ?3, replaced_by_id = ?4, version = ?5
-WHERE id = ?6
 `
 
 type UpdateOAuthRefreshTokenParams struct {
@@ -552,18 +463,36 @@ type UpdateOAuthRefreshTokenParams struct {
 	ValidUntil   int64
 	DeleteAfter  int64
 	ReplacedByID string
-	Version      int64
 	ID           string
 }
 
-func (q *Queries) UpdateOAuthRefreshToken(ctx context.Context, arg UpdateOAuthRefreshTokenParams) error {
-	_, err := q.db.ExecContext(ctx, updateOAuthRefreshToken,
+func (q *Queries) UpdateOAuthRefreshToken(ctx context.Context, arg UpdateOAuthRefreshTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateOAuthRefreshToken,
 		arg.GrantID,
 		arg.ValidUntil,
 		arg.DeleteAfter,
 		arg.ReplacedByID,
-		arg.Version,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const upsertOAuthRefreshSession = `-- name: UpsertOAuthRefreshSession :exec
+INSERT INTO oauth2as_refresh_sessions (grant_id, expires_at, last_used_at)
+VALUES (?1, ?2, ?3)
+ON CONFLICT(grant_id) DO UPDATE SET expires_at = excluded.expires_at, last_used_at = excluded.last_used_at
+`
+
+type UpsertOAuthRefreshSessionParams struct {
+	GrantID    string
+	ExpiresAt  int64
+	LastUsedAt int64
+}
+
+func (q *Queries) UpsertOAuthRefreshSession(ctx context.Context, arg UpsertOAuthRefreshSessionParams) error {
+	_, err := q.db.ExecContext(ctx, upsertOAuthRefreshSession, arg.GrantID, arg.ExpiresAt, arg.LastUsedAt)
 	return err
 }

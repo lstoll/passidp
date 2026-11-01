@@ -20,11 +20,7 @@ func TestListRefreshSessions(t *testing.T) {
 
 	putGrantAndSession := func(session storedRefreshSession) {
 		t.Helper()
-		if err := store.commit(t.Context(), storageCommit{
-			Checks: []storageCheck{
-				{Kind: storageKindGrant, ID: session.GrantID},
-				{Kind: storageKindSession, ID: session.GrantID},
-			},
+		if err := store.seed(t.Context(), storageFixtures{
 			Grants: []storedGrant{{
 				ID:            session.GrantID,
 				UserID:        session.UserID,
@@ -178,11 +174,7 @@ func TestListRefreshSessionsDPoPBound(t *testing.T) {
 		"unbound": "",
 		"none":    "",
 	} {
-		if err := store.commit(t.Context(), storageCommit{
-			Checks: []storageCheck{
-				{Kind: storageKindGrant, ID: id},
-				{Kind: storageKindSession, ID: id},
-			},
+		if err := store.seed(t.Context(), storageFixtures{
 			Grants: []storedGrant{{
 				ID:             id,
 				UserID:         "user",

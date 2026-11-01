@@ -18,7 +18,7 @@ func TestTokenCommitFailuresAreAtomic(t *testing.T) {
 	store := newTestStorage(t)
 	authCode := newCodeGrant(t, store)
 	var failCommits atomic.Bool
-	store.commitHook = func(storageCommit) error {
+	store.commitHook = func() error {
 		if failCommits.Load() {
 			return errors.New("injected commit failure")
 		}

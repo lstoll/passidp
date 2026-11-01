@@ -108,25 +108,17 @@ func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedGr
 		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep code around as long as the grant
 	}
 	loadedGrant.grant.ID = grid
-	if err := s.config.Storage.commit(ctx, storageCommit{
-		Checks: []storageCheck{
-			{Kind: storageKindGrant, ID: grid},
-			{Kind: storageKindAuthCode, ID: cid},
-		},
-		Grants:    []storedGrant{*loadedGrant.grant},
-		AuthCodes: []storedAuthCode{*storedCode},
-	}); err != nil {
+	if err := s.config.Storage.createGrantWithAuthCode(ctx, loadedGrant.grant, storedCode); err != nil {
 		return "", "", fmt.Errorf("create grant and authorization code: %w", err)
 	}
 	loadedGrant.grant.storageVersion = 1
-	storedCode.storageVersion = 1
 
 	return grid, raw, nil
 }
 
 // prepareRefreshToken creates the opaque token and its storage record without
 // writing either the token or grant. The caller commits all related changes as
-// one conditional batch after the response has been successfully built.
+// one transaction after the response has been successfully built.
 func prepareRefreshToken(grant *storedGrant, tokenExpiresAt time.Time) (string, *storedRefreshToken) {
 	raw, id := token.New(token.RefreshToken)
 	return raw, &storedRefreshToken{

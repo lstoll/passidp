@@ -23,7 +23,6 @@ type Oauth2asAuthorizationCode struct {
 	GrantID     string
 	ValidUntil  int64
 	DeleteAfter int64
-	Version     int64
 }
 
 type Oauth2asGrant struct {
@@ -44,20 +43,12 @@ type Oauth2asGrant struct {
 	Version         int64
 }
 
-type Oauth2asRefreshSession struct {
-	GrantID    string
-	ExpiresAt  int64
-	LastUsedAt int64
-	Version    int64
-}
-
 type Oauth2asRefreshToken struct {
 	ID           string
 	GrantID      string
 	ValidUntil   int64
 	DeleteAfter  int64
 	ReplacedByID string
-	Version      int64
 }
 
 type PendingEnrollment struct {

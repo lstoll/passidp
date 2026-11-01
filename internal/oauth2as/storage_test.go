@@ -18,8 +18,7 @@ func TestStorageCleanup(t *testing.T) {
 		{"expired-2", now},
 		{"active", now.Add(time.Minute)},
 	} {
-		if err := store.commit(context.Background(), storageCommit{
-			Checks: []storageCheck{{Kind: storageKindGrant, ID: item.id}},
+		if err := store.seed(context.Background(), storageFixtures{
 			Grants: []storedGrant{{ID: item.id, UserID: "user", ClientID: "client", ExpiresAt: item.expires}},
 		}); err != nil {
 			t.Fatal(err)
@@ -51,13 +50,7 @@ func TestStorageCleanupCascadesGrantChildren(t *testing.T) {
 	store := newTestStorage(t)
 	now := time.Now().Round(0)
 	grantID := "grant-1"
-	if err := store.commit(context.Background(), storageCommit{
-		Checks: []storageCheck{
-			{Kind: storageKindGrant, ID: grantID},
-			{Kind: storageKindAuthCode, ID: "code-1"},
-			{Kind: storageKindRefreshToken, ID: "token-1"},
-			{Kind: storageKindSession, ID: grantID},
-		},
+	if err := store.seed(context.Background(), storageFixtures{
 		Grants:        []storedGrant{{ID: grantID, UserID: "user", ClientID: "client", ExpiresAt: now}},
 		AuthCodes:     []storedAuthCode{{ID: "code-1", GrantID: grantID, StorageExpiresAt: now.Add(time.Hour)}},
 		RefreshTokens: []storedRefreshToken{{ID: "token-1", GrantID: grantID, StorageExpiresAt: now.Add(time.Hour)}},

@@ -209,13 +209,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		return nil, err
 	}
 
-	commit := tokenResponseCommit(loadedGrant.grant, prepared)
-	commit.Checks = append(commit.Checks,
-		storageCheck{Kind: storageKindAuthCode, ID: loadedGrant.authCode.ID, Version: loadedGrant.authCode.storageVersion},
-		storageCheck{Kind: storageKindGrant, ID: loadedGrant.grant.ID, Version: loadedGrant.grant.storageVersion},
-	)
-	commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindAuthCode, ID: loadedGrant.authCode.ID})
-	if err := s.config.Storage.commit(ctx, commit); err != nil {
+	if err := s.config.Storage.exchangeCode(ctx, loadedGrant, prepared); err != nil {
 		if errors.Is(err, errStorageConflict) {
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "authorization code already used"}
 		}
@@ -285,28 +279,11 @@ func (s *Server) refreshToken(ctx context.Context, req *http.Request, treq *oaut
 		return nil, err
 	}
 
-	commit := tokenResponseCommit(loadedGrant.grant, prepared)
-	commit.Checks = append(commit.Checks,
-		storageCheck{Kind: storageKindGrant, ID: loadedGrant.grant.ID, Version: loadedGrant.grant.storageVersion},
-		storageCheck{Kind: storageKindRefreshToken, ID: loadedGrant.refreshToken.ID, Version: loadedGrant.refreshToken.storageVersion},
-	)
-	if replacedTokenID != "" {
-		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: replacedTokenID})
+	// Set the grace deadline once; retries must not extend the original window.
+	if prepared.refreshToken != nil && replacedTokenID == "" {
+		loadedGrant.refreshToken.ValidUntil = s.now().Add(s.config.RefreshTokenRotationGracePeriod)
 	}
-	if prepared.refreshToken == nil {
-		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindRefreshToken, ID: loadedGrant.refreshToken.ID})
-		commit.Deletes = append(commit.Deletes, storageRef{Kind: storageKindSession, ID: loadedGrant.grant.ID})
-	} else {
-		// Retain consumed tokens through the grant lifetime, including with no
-		// grace period, so later reuse can revoke the active replacement.
-		if replacedTokenID == "" {
-			loadedGrant.refreshToken.ValidUntil = s.now().Add(s.config.RefreshTokenRotationGracePeriod)
-		}
-		loadedGrant.refreshToken.ReplacedByTokenID = prepared.refreshToken.ID
-		commit.RefreshTokens = append(commit.RefreshTokens, *loadedGrant.refreshToken)
-	}
-
-	if err := s.config.Storage.commit(ctx, commit); err != nil {
+	if err := s.config.Storage.rotateRefreshToken(ctx, loadedGrant, prepared); err != nil {
 		if errors.Is(err, errStorageConflict) {
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "refresh token already used"}
 		}

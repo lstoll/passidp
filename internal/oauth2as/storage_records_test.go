@@ -7,12 +7,11 @@ import (
 )
 
 // These convenience methods are used by package tests to create records
-// directly without reproducing the storage commit setup at each call site.
+// directly without repeating fixture setup at each call site.
 func (s *Storage) createGrant(ctx context.Context, grant *storedGrant) (string, error) {
 	id := uuid.NewV4().String()
 	grant.ID = id
-	if err := s.commit(ctx, storageCommit{
-		Checks: []storageCheck{{Kind: storageKindGrant, ID: id}},
+	if err := s.seed(ctx, storageFixtures{
 		Grants: []storedGrant{*grant},
 	}); err != nil {
 		return "", err
@@ -23,8 +22,7 @@ func (s *Storage) createGrant(ctx context.Context, grant *storedGrant) (string, 
 
 func (s *Storage) updateGrant(ctx context.Context, id string, grant *storedGrant) error {
 	grant.ID = id
-	if err := s.commit(ctx, storageCommit{
-		Checks: []storageCheck{{Kind: storageKindGrant, ID: id, Version: grant.storageVersion}},
+	if err := s.seed(ctx, storageFixtures{
 		Grants: []storedGrant{*grant},
 	}); err != nil {
 		return err
@@ -35,24 +33,14 @@ func (s *Storage) updateGrant(ctx context.Context, id string, grant *storedGrant
 
 func (s *Storage) createAuthCode(ctx context.Context, id string, code *storedAuthCode) error {
 	code.ID = id
-	err := s.commit(ctx, storageCommit{
-		Checks:    []storageCheck{{Kind: storageKindAuthCode, ID: id}},
+	return s.seed(ctx, storageFixtures{
 		AuthCodes: []storedAuthCode{*code},
 	})
-	if err == nil {
-		code.storageVersion = 1
-	}
-	return err
 }
 
 func (s *Storage) createRefreshToken(ctx context.Context, id string, token *storedRefreshToken) error {
 	token.ID = id
-	err := s.commit(ctx, storageCommit{
-		Checks:        []storageCheck{{Kind: storageKindRefreshToken, ID: id}},
+	return s.seed(ctx, storageFixtures{
 		RefreshTokens: []storedRefreshToken{*token},
 	})
-	if err == nil {
-		token.storageVersion = 1
-	}
-	return err
 }

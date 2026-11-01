@@ -3,7 +3,6 @@ package oauth2as
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -12,45 +11,6 @@ var (
 	ErrNotFound        = errors.New("not found")
 	errStorageConflict = errors.New("storage conflict")
 )
-
-type storageKind string
-
-const (
-	storageKindGrant        storageKind = "grant"
-	storageKindAuthCode     storageKind = "auth_code"
-	storageKindRefreshToken storageKind = "refresh_token"
-	storageKindSession      storageKind = "session"
-)
-
-// storageRef identifies one stored record.
-type storageRef struct {
-	Kind storageKind
-	ID   string
-}
-
-// storageCheck is a precondition for an atomic commit. Version zero requires
-// that the record does not exist; any other value requires an exact match.
-type storageCheck struct {
-	Kind    storageKind
-	ID      string
-	Version uint64
-}
-
-func (c storageCheck) ref() storageRef { return storageRef{Kind: c.Kind, ID: c.ID} }
-
-// storageCommit is an atomic conditional batch. All checks must be evaluated
-// against one consistent view. If any check fails, Commit must return
-// errStorageConflict without applying any put or delete. A put creates version
-// one or increments the existing version. Mutating one record more than once
-// makes a commit invalid and must not apply any changes.
-type storageCommit struct {
-	Checks        []storageCheck
-	Grants        []storedGrant
-	AuthCodes     []storedAuthCode
-	RefreshTokens []storedRefreshToken
-	Sessions      []storedRefreshSession
-	Deletes       []storageRef
-}
 
 // storedAuthCode represents an authorization code that is issued during the
 // authorization flow. Auth codes are short-lived and single-use.
@@ -63,7 +23,6 @@ type storedAuthCode struct {
 	// StorageExpiresAt is the time at which the code can be deleted from storage.
 	// This is typically after ValidUntil to allow for cleanup.
 	StorageExpiresAt time.Time
-	storageVersion   uint64
 }
 
 // storedRefreshToken represents a refresh token that can be used to obtain new
@@ -80,7 +39,6 @@ type storedRefreshToken struct {
 	// ReplacedByTokenID is the ID of the token that replaced this one during rotation.
 	// Used for tracking rotation chains and enforcing grace period policies.
 	ReplacedByTokenID string
-	storageVersion    uint64
 }
 
 type storedGrant struct {
@@ -171,53 +129,4 @@ type storageRefreshSessionQuery struct {
 	AfterLastUsed time.Time
 	AfterGrantID  string
 	Limit         int
-}
-
-func validateStorageCommit(commit storageCommit) error {
-	mutated := make(map[storageRef]struct{}, len(commit.Grants)+len(commit.AuthCodes)+len(commit.RefreshTokens)+len(commit.Sessions)+len(commit.Deletes))
-	add := func(ref storageRef) error {
-		if ref.ID == "" {
-			return fmt.Errorf("storage commit missing %s id", ref.Kind)
-		}
-		if _, exists := mutated[ref]; exists {
-			return fmt.Errorf("storage commit mutates %s %q more than once", ref.Kind, ref.ID)
-		}
-		mutated[ref] = struct{}{}
-		return nil
-	}
-	for i := range commit.Grants {
-		if err := add(storageRef{Kind: storageKindGrant, ID: commit.Grants[i].ID}); err != nil {
-			return err
-		}
-	}
-	for i := range commit.AuthCodes {
-		if err := add(storageRef{Kind: storageKindAuthCode, ID: commit.AuthCodes[i].ID}); err != nil {
-			return err
-		}
-	}
-	for i := range commit.RefreshTokens {
-		if err := add(storageRef{Kind: storageKindRefreshToken, ID: commit.RefreshTokens[i].ID}); err != nil {
-			return err
-		}
-	}
-	for i := range commit.Sessions {
-		if err := add(storageRef{Kind: storageKindSession, ID: commit.Sessions[i].GrantID}); err != nil {
-			return err
-		}
-	}
-	for _, ref := range commit.Deletes {
-		if err := add(ref); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func hasCreateCheck(checks []storageCheck, ref storageRef) bool {
-	for _, check := range checks {
-		if check.ref() == ref && check.Version == 0 {
-			return true
-		}
-	}
-	return false
 }

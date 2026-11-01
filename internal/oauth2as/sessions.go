@@ -3,7 +3,6 @@ package oauth2as
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -113,21 +112,12 @@ func (s *Server) RevokeRefreshSession(ctx context.Context, userID, grantID strin
 	if userID == "" || grantID == "" {
 		return ErrNotFound
 	}
-	grant, err := s.config.Storage.getGrant(ctx, grantID)
+	revoked, err := s.config.Storage.revokeGrant(ctx, userID, grantID)
 	if err != nil {
-		return err
-	}
-	if grant.UserID != userID {
-		return ErrNotFound
-	}
-	if err := s.config.Storage.commit(ctx, storageCommit{
-		Checks:  []storageCheck{{Kind: storageKindGrant, ID: grantID, Version: grant.storageVersion}},
-		Deletes: []storageRef{{Kind: storageKindGrant, ID: grantID}},
-	}); err != nil {
-		if errors.Is(err, errStorageConflict) {
-			return ErrNotFound
-		}
 		return fmt.Errorf("revoke refresh session: %w", err)
+	}
+	if !revoked {
+		return ErrNotFound
 	}
 	return nil
 }

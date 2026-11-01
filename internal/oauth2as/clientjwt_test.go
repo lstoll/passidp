@@ -62,8 +62,7 @@ func TestJWTClientTokenAuth(t *testing.T) {
 				},
 			},
 		},
-		now:                   time.Now,
-		clientAssertionReplay: newMemoryClientAssertionReplayStore(),
+		now: time.Now,
 	}
 
 	t.Run("code exchange", func(t *testing.T) {

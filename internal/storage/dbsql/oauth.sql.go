@@ -50,6 +50,26 @@ func (q *Queries) CleanupOAuthAuthCodes(ctx context.Context, arg CleanupOAuthAut
 	return result.RowsAffected()
 }
 
+const cleanupOAuthClientAssertions = `-- name: CleanupOAuthClientAssertions :execrows
+DELETE FROM oauth2as_client_assertions WHERE assertion_key IN (
+ SELECT oauth2as_client_assertions.assertion_key FROM oauth2as_client_assertions WHERE oauth2as_client_assertions.expires_at <= ?1
+ ORDER BY oauth2as_client_assertions.expires_at LIMIT ?2
+)
+`
+
+type CleanupOAuthClientAssertionsParams struct {
+	Cutoff  int64
+	MaxRows int64
+}
+
+func (q *Queries) CleanupOAuthClientAssertions(ctx context.Context, arg CleanupOAuthClientAssertionsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, cleanupOAuthClientAssertions, arg.Cutoff, arg.MaxRows)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const cleanupOAuthGrants = `-- name: CleanupOAuthGrants :execrows
 DELETE FROM oauth2as_grants WHERE id IN (
  SELECT oauth2as_grants.id FROM oauth2as_grants WHERE oauth2as_grants.expires_at <= ?1
@@ -267,6 +287,7 @@ SELECT EXISTS (
  UNION ALL SELECT 1 FROM oauth2as_authorization_codes WHERE oauth2as_authorization_codes.delete_after <= ?1
  UNION ALL SELECT 1 FROM oauth2as_refresh_tokens WHERE oauth2as_refresh_tokens.delete_after <= ?1
  UNION ALL SELECT 1 FROM oauth2as_grants WHERE oauth2as_grants.expires_at <= ?1
+ UNION ALL SELECT 1 FROM oauth2as_client_assertions WHERE oauth2as_client_assertions.expires_at <= ?1
 )
 `
 
@@ -297,6 +318,25 @@ func (q *Queries) InsertOAuthAuthCode(ctx context.Context, arg InsertOAuthAuthCo
 		arg.DeleteAfter,
 	)
 	return err
+}
+
+const insertOAuthClientAssertion = `-- name: InsertOAuthClientAssertion :execrows
+INSERT INTO oauth2as_client_assertions (assertion_key, expires_at)
+VALUES (?1, ?2)
+ON CONFLICT(assertion_key) DO NOTHING
+`
+
+type InsertOAuthClientAssertionParams struct {
+	AssertionKey []byte
+	ExpiresAt    int64
+}
+
+func (q *Queries) InsertOAuthClientAssertion(ctx context.Context, arg InsertOAuthClientAssertionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertOAuthClientAssertion, arg.AssertionKey, arg.ExpiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const insertOAuthGrant = `-- name: InsertOAuthGrant :exec
@@ -437,6 +477,25 @@ func (q *Queries) ListOAuthRefreshSessions(ctx context.Context, arg ListOAuthRef
 		return nil, err
 	}
 	return items, nil
+}
+
+const reuseExpiredOAuthClientAssertion = `-- name: ReuseExpiredOAuthClientAssertion :execrows
+UPDATE oauth2as_client_assertions SET expires_at = ?1
+WHERE assertion_key = ?2 AND expires_at <= ?3
+`
+
+type ReuseExpiredOAuthClientAssertionParams struct {
+	ExpiresAt    int64
+	AssertionKey []byte
+	Cutoff       int64
+}
+
+func (q *Queries) ReuseExpiredOAuthClientAssertion(ctx context.Context, arg ReuseExpiredOAuthClientAssertionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reuseExpiredOAuthClientAssertion, arg.ExpiresAt, arg.AssertionKey, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :execrows

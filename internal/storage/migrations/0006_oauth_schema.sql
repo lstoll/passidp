@@ -40,6 +40,12 @@ CREATE TABLE oauth2as_refresh_sessions (
     last_used_at INTEGER NOT NULL
 );
 
+-- Used private_key_jwt assertion IDs, kept until the assertion expires.
+CREATE TABLE oauth2as_client_assertions (
+    assertion_key BLOB PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+
 CREATE INDEX oauth2as_grant_owner_idx ON oauth2as_grants (user_id, client_id, id);
 CREATE INDEX oauth2as_grant_expiry_idx ON oauth2as_grants (expires_at);
 CREATE INDEX oauth2as_code_expiry_idx ON oauth2as_authorization_codes (delete_after);
@@ -47,3 +53,4 @@ CREATE INDEX oauth2as_code_grant_idx ON oauth2as_authorization_codes (grant_id);
 CREATE INDEX oauth2as_token_expiry_idx ON oauth2as_refresh_tokens (delete_after);
 CREATE INDEX oauth2as_token_grant_idx ON oauth2as_refresh_tokens (grant_id);
 CREATE INDEX oauth2as_session_active_idx ON oauth2as_refresh_sessions (expires_at, last_used_at, grant_id);
+CREATE INDEX oauth2as_client_assertion_expiry_idx ON oauth2as_client_assertions (expires_at);

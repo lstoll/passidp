@@ -57,10 +57,6 @@ type Config struct {
 	// TokenURL is the token endpoint URL used as the audience for
 	// private_key_jwt client assertions. It defaults to Issuer + "/token".
 	TokenURL string
-	// ClientAssertionReplayStore provides atomic replay protection for
-	// private_key_jwt assertions. A process-local bounded store is used when
-	// omitted; configure a shared implementation for multiple replicas.
-	ClientAssertionReplayStore ClientAssertionReplayStore
 
 	Logger *slog.Logger
 
@@ -105,8 +101,6 @@ type Server struct {
 	logger *slog.Logger
 
 	now func() time.Time
-
-	clientAssertionReplay ClientAssertionReplayStore
 }
 
 func (s *Server) defaultIDTokenSigningAlgorithm() jwt.Algorithm {
@@ -219,14 +213,10 @@ func NewServer(c Config) (*Server, error) {
 	}
 
 	svr := &Server{
-		config:                c,
-		accessTokenVerifier:   accessTokenVerifier,
-		logger:                slog.New(slog.DiscardHandler),
-		now:                   time.Now,
-		clientAssertionReplay: c.ClientAssertionReplayStore,
-	}
-	if svr.clientAssertionReplay == nil {
-		svr.clientAssertionReplay = newMemoryClientAssertionReplayStore()
+		config:              c,
+		accessTokenVerifier: accessTokenVerifier,
+		logger:              slog.New(slog.DiscardHandler),
+		now:                 time.Now,
 	}
 
 	if c.Logger != nil {
@@ -350,10 +340,7 @@ func (s *Server) validateJWTClient(ctx context.Context, req *oauth2proto.TokenRe
 	if err != nil || !exp.After(iat) || exp.Sub(iat) > clientAssertionMaxLifetime {
 		return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication", Cause: fmt.Errorf("assertion lifetime is invalid")}
 	}
-	if s.clientAssertionReplay == nil {
-		return &oauth2proto.HTTPError{Code: http.StatusInternalServerError, Message: "internal error", CauseMsg: "client assertion replay protection is unavailable", Cause: ErrClientAssertionReplayStore}
-	}
-	if err := s.clientAssertionReplay.Use(ctx, clientID, jti, exp.Add(jwt.DefaultClockSkew)); err != nil {
+	if err := s.config.Storage.useClientAssertion(ctx, clientID, jti, exp.Add(jwt.DefaultClockSkew)); err != nil {
 		if errors.Is(err, ErrClientAssertionReplay) {
 			return &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidClient, Description: "Invalid client authentication", Cause: err}
 		}

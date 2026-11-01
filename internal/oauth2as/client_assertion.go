@@ -6,68 +6,62 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
+
+	"lds.li/passidp/internal/storage/dbsql"
 )
 
 const (
 	clientAssertionMaxLifetime = 5 * time.Minute
-	clientAssertionReplayLimit = 10000
 	clientAssertionMaxJTI      = 256
 )
 
-var (
-	// ErrClientAssertionReplay indicates that an assertion jti was already used.
-	ErrClientAssertionReplay = errors.New("oauth2as: client assertion replay")
-	// ErrClientAssertionReplayStore indicates that replay protection could not
-	// safely record a new assertion.
-	ErrClientAssertionReplayStore = errors.New("oauth2as: client assertion replay store unavailable")
-)
+// ErrClientAssertionReplay indicates that an assertion jti was already used.
+var ErrClientAssertionReplay = errors.New("oauth2as: client assertion replay")
 
-// ClientAssertionReplayStore atomically records a client assertion ID in a
-// client-specific namespace until its expiration. Implementations must reject
-// a previously recorded clientID/jti pair.
-// Configure a shared implementation when a server is deployed on multiple
-// replicas.
-type ClientAssertionReplayStore interface {
-	Use(ctx context.Context, clientID, jti string, expiresAt time.Time) error
-}
-
-type memoryClientAssertionReplayStore struct {
-	mu   sync.Mutex
-	seen map[[sha256.Size]byte]time.Time
-}
-
-func newMemoryClientAssertionReplayStore() *memoryClientAssertionReplayStore {
-	return &memoryClientAssertionReplayStore{seen: make(map[[sha256.Size]byte]time.Time)}
-}
-
-func (s *memoryClientAssertionReplayStore) Use(ctx context.Context, clientID, jti string, expiresAt time.Time) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%w: %v", ErrClientAssertionReplayStore, err)
+// useClientAssertion atomically records a private_key_jwt assertion ID for a
+// client until expiresAt. It returns [ErrClientAssertionReplay] if the same
+// client already used the jti and that record has not expired. Records are kept
+// in SQLite so replay protection survives restarts and is shared by replicas.
+func (s *Storage) useClientAssertion(ctx context.Context, clientID, jti string, expiresAt time.Time) error {
+	if len(clientID) == 0 || len(jti) == 0 || len(jti) > clientAssertionMaxJTI {
+		return fmt.Errorf("oauth2as: invalid client assertion identifier")
 	}
-	if len(clientID) == 0 || len(jti) == 0 || len(jti) > clientAssertionMaxJTI || !expiresAt.After(time.Now()) {
-		return fmt.Errorf("%w: invalid assertion", ErrClientAssertionReplayStore)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	now := time.Now()
-	for id, until := range s.seen {
-		if now.After(until) {
-			delete(s.seen, id)
-		}
+	if !expiresAt.After(now) {
+		return fmt.Errorf("oauth2as: client assertion already expired")
 	}
+	key := clientAssertionKey(clientID, jti)
+	return s.transact(ctx, func(q *dbsql.Queries) error {
+		rows, err := q.InsertOAuthClientAssertion(ctx, dbsql.InsertOAuthClientAssertionParams{
+			AssertionKey: key[:], ExpiresAt: expiresAt.UnixMicro(),
+		})
+		if err != nil {
+			return err
+		}
+		if rows == 1 {
+			return nil
+		}
+		// A record whose expiry passed but was not cleaned up yet is reusable.
+		rows, err = q.ReuseExpiredOAuthClientAssertion(ctx, dbsql.ReuseExpiredOAuthClientAssertionParams{
+			AssertionKey: key[:], ExpiresAt: expiresAt.UnixMicro(), Cutoff: now.UnixMicro(),
+		})
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrClientAssertionReplay
+		}
+		return nil
+	})
+}
+
+// clientAssertionKey namespaces the attacker-controlled jti by client and
+// stores only a fixed-size digest. The length prefix keeps framing unambiguous.
+func clientAssertionKey(clientID, jti string) [sha256.Size]byte {
 	framed := make([]byte, 8+len(clientID)+len(jti))
 	binary.BigEndian.PutUint64(framed, uint64(len(clientID)))
 	copy(framed[8:], clientID)
 	copy(framed[8+len(clientID):], jti)
-	key := sha256.Sum256(framed)
-	if _, ok := s.seen[key]; ok {
-		return ErrClientAssertionReplay
-	}
-	if len(s.seen) >= clientAssertionReplayLimit {
-		return ErrClientAssertionReplayStore
-	}
-	s.seen[key] = expiresAt
-	return nil
+	return sha256.Sum256(framed)
 }

@@ -65,12 +65,28 @@ WHERE g.user_id = sqlc.arg(user_id) AND rs.expires_at > sqlc.arg(active_at)
       OR sqlc.arg(after_grant_id) = '' OR rs.last_used_at < sqlc.arg(after_last_used))
 ORDER BY rs.last_used_at DESC, rs.grant_id ASC LIMIT sqlc.arg(max_rows);
 
+-- name: InsertOAuthClientAssertion :execrows
+INSERT INTO oauth2as_client_assertions (assertion_key, expires_at)
+VALUES (sqlc.arg(assertion_key), sqlc.arg(expires_at))
+ON CONFLICT(assertion_key) DO NOTHING;
+
+-- name: ReuseExpiredOAuthClientAssertion :execrows
+UPDATE oauth2as_client_assertions SET expires_at = sqlc.arg(expires_at)
+WHERE assertion_key = sqlc.arg(assertion_key) AND expires_at <= sqlc.arg(cutoff);
+
+-- name: CleanupOAuthClientAssertions :execrows
+DELETE FROM oauth2as_client_assertions WHERE assertion_key IN (
+ SELECT oauth2as_client_assertions.assertion_key FROM oauth2as_client_assertions WHERE oauth2as_client_assertions.expires_at <= sqlc.arg(cutoff)
+ ORDER BY oauth2as_client_assertions.expires_at LIMIT sqlc.arg(max_rows)
+);
+
 -- name: HasExpiredOAuthRecords :one
 SELECT EXISTS (
  SELECT 1 FROM oauth2as_refresh_sessions WHERE oauth2as_refresh_sessions.expires_at <= sqlc.arg(cutoff)
  UNION ALL SELECT 1 FROM oauth2as_authorization_codes WHERE oauth2as_authorization_codes.delete_after <= sqlc.arg(cutoff)
  UNION ALL SELECT 1 FROM oauth2as_refresh_tokens WHERE oauth2as_refresh_tokens.delete_after <= sqlc.arg(cutoff)
  UNION ALL SELECT 1 FROM oauth2as_grants WHERE oauth2as_grants.expires_at <= sqlc.arg(cutoff)
+ UNION ALL SELECT 1 FROM oauth2as_client_assertions WHERE oauth2as_client_assertions.expires_at <= sqlc.arg(cutoff)
 );
 
 -- name: GetOAuthAuthCodeAndGrant :one

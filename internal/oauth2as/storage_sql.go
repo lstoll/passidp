@@ -200,6 +200,9 @@ func (s *Storage) cleanup(ctx context.Context, options CleanupOptions) (CleanupR
 		func(limit int64) (int64, error) {
 			return q.CleanupOAuthGrants(ctx, dbsql.CleanupOAuthGrantsParams{Cutoff: cutoff, MaxRows: limit})
 		},
+		func(limit int64) (int64, error) {
+			return q.CleanupOAuthClientAssertions(ctx, dbsql.CleanupOAuthClientAssertionsParams{Cutoff: cutoff, MaxRows: limit})
+		},
 	}
 	for _, cleanup := range cleanups {
 		if remaining == 0 {

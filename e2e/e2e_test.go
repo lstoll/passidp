@@ -658,11 +658,12 @@ func logAction(tb testing.TB, format string, args ...any) chromedp.Action { //no
 	})
 }
 
+// clearErrchan discards errors already queued from earlier steps.
 func clearErrchan(c chan error) {
 loop:
 	for {
 		select {
-		case <-c:
+		case <-c: //nolint:errcheck // stale errors are intentionally dropped
 		default:
 			break loop
 		}

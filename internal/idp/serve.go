@@ -16,14 +16,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"lds.li/keyset"
 	"lds.li/oauth2ext/dpop"
-	"lds.li/oauth2ext/oauth2as"
-	"lds.li/oauth2ext/oauth2as/discovery"
 	"lds.li/passidp/internal/admincli"
 	"lds.li/passidp/internal/adminui"
 	"lds.li/passidp/internal/appsession"
 	"lds.li/passidp/internal/auth"
 	"lds.li/passidp/internal/clients"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oauth2as"
+	"lds.li/passidp/internal/oauth2as/discovery"
 	"lds.li/passidp/internal/oidcsvr"
 	"lds.li/passidp/internal/policy"
 	"lds.li/passidp/internal/storage"
@@ -62,7 +62,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 		return fmt.Errorf("open sqlite state from %s: %w", sqlPath, err)
 	}
 
-	oauth2Store, err := storage.NewOAuth2Storage(ctx, sqlDB)
+	oauth2Store, err := oauth2as.NewSQLStorage(sqlDB)
 	if err != nil {
 		return fmt.Errorf("create oauth2 storage: %w", err)
 	}
@@ -77,7 +77,6 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 	enrollmentStore := storage.NewEnrollmentStore(sqlDB)
 	dynamicClientStore := storage.NewDynamicClientStore(sqlDB)
 	dpopReplayStore := storage.NewDPoPReplayStore(sqlDB)
-	oauth2Grants := storage.NewOAuth2Grants(sqlDB)
 
 	g.Add(storage.OAuth2GarbageCollector(oauth2Store, 1*time.Hour))
 	g.Add(storage.SessionGarbageCollector(sessionKV, 1*time.Hour))
@@ -93,8 +92,17 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 		}
 	})
 
-	multiClients := clients.NewMultiClients(&clients.StaticClients{
-		Clients: config.Clients},
+	staticClients, err := clients.NewStaticClients(config.Clients)
+	if err != nil {
+		return fmt.Errorf("configure static clients: %w", err)
+	}
+	for _, remote := range staticClients.RemoteJWKS() {
+		// Each loader gets its own context so the group can stop it when
+		// another actor exits, not only when the process context is cancelled.
+		loadCtx, stopLoad := context.WithCancel(ctx)
+		g.Add(func() error { return remote.Run(loadCtx) }, func(error) { stopLoad() })
+	}
+	multiClients := clients.NewMultiClients(staticClients,
 		&clients.DynamicClients{DB: dynamicClientStore},
 	)
 
@@ -102,7 +110,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 		return fmt.Errorf("apply passkey user config: %w", err)
 	}
 
-	idph, err := NewIDP(ctx, &g, config, credStore, oauth2Store, sessionKV, keysetStore, enrollmentStore, dpopReplayStore, oauth2Grants, config.ParsedIssuer, multiClients)
+	idph, err := NewIDP(ctx, &g, config, credStore, oauth2Store, sessionKV, keysetStore, enrollmentStore, dpopReplayStore, config.ParsedIssuer, multiClients)
 	if err != nil {
 		return fmt.Errorf("start server: %v", err)
 	}
@@ -171,8 +179,8 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 }
 
 // NewIDP creates a new IDP server for the given params.
-func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *storage.CredentialFile, oauth2 *oauth2as.Storage, sessionKV session.KV, keysetStore keyset.AdminStore, enrollments *storage.EnrollmentStore, dpopReplay dpop.ReplayStore, oauth2Grants *storage.OAuth2Grants, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
-	oidcHandles, sessionMAC, err := initKeysets(ctx, keysetStore)
+func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *storage.CredentialFile, oauth2 *oauth2as.Storage, sessionKV session.KV, keysetStore keyset.AdminStore, enrollments *storage.EnrollmentStore, dpopReplay dpop.ReplayStore, issuerURL *url.URL, clients *clients.MultiClients) (http.Handler, error) {
+	oidcSigner, oidcKeys, sessionMAC, err := initKeysets(ctx, keysetStore)
 	if err != nil {
 		return nil, fmt.Errorf("initializing keysets: %w", err)
 	}
@@ -246,10 +254,10 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 		return nil, fmt.Errorf("inserting force tls middleware: %w", err)
 	}
 
-	rp, err := passkey.NewRelyingParty(&passkey.Options{
-		RPID:   issuerURL.Hostname(),
-		Origin: issuerURL.Scheme + "://" + issuerURL.Host,
-	})
+	rp, err := passkey.NewRelyingParty(
+		issuerURL.Hostname(), issuerURL.Scheme+"://"+issuerURL.Host,
+		passkey.Options{Timeout: 5 * time.Minute},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("configuring passkey relying party: %w", err)
 	}
@@ -264,18 +272,16 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	}
 
 	auth := &auth.Authenticator{
-		Passkey:      rp,
-		CredStore:    credStore,
-		OAuth2Grants: oauth2Grants,
-		Config:       cfg,
+		Passkey:   rp,
+		CredStore: credStore,
+		Config:    cfg,
 	}
 	auth.AddHandlers(websvr)
 
 	oidchHandlers := &oidcsvr.Handlers{
-		Issuer:  issuerURL.String(),
-		Clients: clients,
-		Config:  cfg,
-		Policy:  pol,
+		Issuer: issuerURL.String(),
+		Config: cfg,
+		Policy: pol,
 	}
 
 	dpopVerifier := &dpop.Verifier{
@@ -298,11 +304,11 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	}
 
 	oauth2asConfig := oauth2as.Config{
-		Issuer:   issuerURL.String(),
-		Storage:  oauth2,
-		Clients:  clients,
-		Signer:   oidcHandles,
-		Verifier: oidcHandles,
+		Issuer:           issuerURL.String(),
+		Storage:          oauth2,
+		Clients:          clients,
+		Signer:           oidcSigner,
+		VerificationKeys: oidcKeys,
 
 		DPoPVerifier: dpopVerifier,
 
@@ -325,13 +331,15 @@ func NewIDP(ctx context.Context, g *run.Group, cfg *config.Config, credStore *st
 	auth.OAuth2 = oauth2asServer
 
 	pmd := discovery.DefaultCoreMetadata(issuerURL.String())
-	pmd.IDTokenSigningAlgValuesSupported = []string{"ES256"}
 	pmd.AuthorizationEndpoint = issuerURL.String() + "/authorization"
 	pmd.TokenEndpoint = issuerURL.String() + "/token"
 	pmd.UserinfoEndpoint = issuerURL.String() + "/userinfo"
 	pmd.RegistrationEndpoint = fmt.Sprintf("%s/registerClient", issuerURL.String())
 
-	disco, err := discovery.NewOIDCConfigurationHandlerWithKeyset(pmd, oidcHandles)
+	disco, err := discovery.NewOIDCConfigurationHandler(discovery.ConfigurationHandlerConfig{
+		Metadata:         pmd,
+		VerificationKeys: oidcKeys,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc configuration handler: %w", err)
 	}

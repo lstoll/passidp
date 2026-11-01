@@ -90,12 +90,9 @@ func TestPasskeyRecordFromLegacyCredential(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		uv, err := passkey.UserVerificationAvailable(got)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !uv {
-			t.Fatal("synthesized zero-flag record should still allow user verification")
+		normalized := parseAuthData(t, authDataFromRecord(t, got))
+		if !normalized.userPresent || !normalized.userVerified {
+			t.Fatalf("synthesized zero-flag record flags = UP:%t UV:%t, want both normalized on", normalized.userPresent, normalized.userVerified)
 		}
 	})
 
@@ -289,16 +286,13 @@ type legacyFixture struct {
 func registerLegacyFixture(t *testing.T) legacyFixture {
 	t.Helper()
 	const rpID = "test.example.com"
-	rp, err := passkey.NewRelyingParty(&passkey.Options{
-		RPID:   rpID,
-		Origin: "https://example.com",
-	})
+	rp, err := passkey.NewRelyingParty(rpID, "https://example.com", passkey.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	passkeyUserID := "legacy-import-user"
-	optionsJSON, err := rp.NewRegistration(passkey.User{ID: passkeyUserID, Name: "legacy@example.com"}, nil)
+	optionsJSON, err := rp.NewRegistration(passkey.User{ID: passkeyUserID, Name: "legacy@example.com"}, passkey.RegistrationOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

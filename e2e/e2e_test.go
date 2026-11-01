@@ -26,6 +26,7 @@ import (
 	"github.com/oklog/run"
 	"golang.org/x/oauth2"
 	clitoken "lds.li/oauth2ext/clitoken"
+	"lds.li/oauth2ext/oauth2client"
 	"lds.li/oauth2ext/oidc"
 	"lds.li/oauth2ext/provider"
 	"lds.li/passidp/internal/admincli"
@@ -179,10 +180,9 @@ func TestE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	oa2Cfg := oauth2.Config{
-		ClientID:     "test-cli",
-		ClientSecret: "public",
-		Endpoint:     provider.Endpoint(),
-		Scopes:       []string{oidc.ScopeOpenID},
+		ClientID: "test-cli",
+		Endpoint: provider.Endpoint(),
+		Scopes:   []string{oidc.ScopeOpenID},
 	}
 
 	/* enable the virtual webauthn environment */
@@ -298,7 +298,7 @@ func TestE2E(t *testing.T) {
 	clearErrchan(chromeErrC)
 
 	testOk = t.Run("Successful Login", func(t *testing.T) {
-		tokC, loginErrC := cliLoginFlow(ctx, t, oa2Cfg)
+		tokC, loginErrC := cliLoginFlow(ctx, t, oa2Cfg, oauth2client.PublicClient)
 
 		runErrC := make(chan error, 1)
 		go func() {
@@ -335,7 +335,7 @@ func TestE2E(t *testing.T) {
 
 	testOk = t.Run("Groups Test", func(t *testing.T) {
 		// Test OIDC flow to verify groups claim is included
-		tokC, loginErrC := cliLoginFlow(ctx, t, oa2Cfg)
+		tokC, loginErrC := cliLoginFlow(ctx, t, oa2Cfg, oauth2client.PublicClient)
 
 		runErrC := make(chan error, 1)
 		go func() {
@@ -499,7 +499,7 @@ func TestE2E(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		tokC, errC := cliLoginFlow(ctx, t, oa2Cfg)
+		tokC, errC := cliLoginFlow(ctx, t, oa2Cfg, oauth2client.PublicClient)
 
 		runErrC := make(chan error, 1)
 		doneC := make(chan struct{}, 1)
@@ -551,11 +551,12 @@ func TestE2E(t *testing.T) {
 // If an error occurs, that will be returned on that channel. It is the callers
 // responsibility to complete the flow - this will only get you to the initial
 // URL for the flow.
-func cliLoginFlow(ctx context.Context, t *testing.T, oa2Cfg oauth2.Config) (chan *oauth2.Token, chan error) { //nolint:thelper // it's not that kind of helper
+func cliLoginFlow(ctx context.Context, t *testing.T, oa2Cfg oauth2.Config, clientType oauth2client.ClientType) (chan *oauth2.Token, chan error) { //nolint:thelper // it's not that kind of helper
 	openCh := make(chan struct{}, 1)
 
 	clicfg := clitoken.Config{
-		OAuth2Config: oa2Cfg,
+		OAuth2Client: &oa2Cfg,
+		ClientType:   clientType,
 		Opener:       &chromeDPOpener{notifyCh: openCh},
 	}
 
@@ -657,11 +658,12 @@ func logAction(tb testing.TB, format string, args ...any) chromedp.Action { //no
 	})
 }
 
+// clearErrchan discards errors already queued from earlier steps.
 func clearErrchan(c chan error) {
 loop:
 	for {
 		select {
-		case <-c:
+		case <-c: //nolint:errcheck // stale errors are intentionally dropped
 		default:
 			break loop
 		}

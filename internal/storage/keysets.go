@@ -1,9 +1,7 @@
 package storage
 
 import (
-	"context"
 	"database/sql"
-	"fmt"
 
 	"lds.li/keyset/insecurecleartext"
 	"lds.li/keyset/sqlstore"
@@ -11,9 +9,9 @@ import (
 
 const keysetTableName = "keysets"
 
-// NewKeysetStore uses cleartext key material explicitly. This matches the old
-// Tink store's at-rest behavior; deployments can introduce a Keeper once a
-// persistent wrapping-key source is available.
+// NewKeysetStore uses cleartext key material explicitly. Deployments can
+// introduce a Keeper once a persistent wrapping-key source is available.
+// Its table is created by the application migrations.
 func NewKeysetStore(db *sql.DB) (*sqlstore.Store, error) {
 	store, err := sqlstore.New(db, insecurecleartext.Keeper,
 		sqlstore.WithDialect(sqlstore.SQLite),
@@ -21,9 +19,6 @@ func NewKeysetStore(db *sql.DB) (*sqlstore.Store, error) {
 	)
 	if err != nil {
 		return nil, err
-	}
-	if _, err := db.ExecContext(context.Background(), store.Schema()); err != nil {
-		return nil, fmt.Errorf("apply keyset schema: %w", err)
 	}
 	return store, nil
 }

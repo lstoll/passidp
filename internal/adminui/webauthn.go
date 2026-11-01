@@ -155,7 +155,7 @@ func (w *WebAuthnManager) beginRegistration(ctx context.Context, rw web.Response
 	optionsJSON, err := w.passkey.NewRegistration(passkey.User{
 		ID:   passkeyUserID,
 		Name: user.Email,
-	}, records)
+	}, passkey.RegistrationOptions{ExcludeCredentials: records})
 	if err != nil {
 		return fmt.Errorf("beginning registration: %w", err)
 	}

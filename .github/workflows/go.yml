@@ -28,10 +28,15 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        # go-version: stable
-        go-version: 1.27.0-rc.3
+        go-version: stable
         cache: false
       id: go
+
+    - name: Check generated SQL
+      run: |
+        go generate ./internal/storage
+        git diff --exit-code -- internal/storage/dbsql
+        test -z "$(git ls-files --others --exclude-standard internal/storage/dbsql)"
 
     - name: Test
       run: |

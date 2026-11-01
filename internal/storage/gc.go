@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"lds.li/oauth2ext/oauth2as"
+	"lds.li/passidp/internal/oauth2as"
 )
 
 // OAuth2GarbageCollector returns a run.Group-compatible worker that periodically

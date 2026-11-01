@@ -1,4 +1,5 @@
-package storage
+// Package migrations applies the shared PassIDP SQLite schema.
+package migrations
 
 import (
 	"context"
@@ -11,12 +12,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"lds.li/passidp/internal/storage/dbsql"
 )
 
-//go:embed migrations/*.sql
+// Numbered migrations and bootstrap.sql are also the schema input for sqlc.
+// Bootstrap creates migration metadata before the numbered migrations run.
+//
+//go:embed [0-9]*.sql
 var migrationFS embed.FS
 
-const schemaMigrationsTable = "schema_migrations"
+//go:embed bootstrap.sql
+var bootstrapSQL string
 
 var migrationFilePattern = regexp.MustCompile(`^(\d+)_(.+)\.sql$`)
 
@@ -26,7 +33,8 @@ type migration struct {
 	stmts   []string
 }
 
-func migrate(ctx context.Context, db *sql.DB) error {
+// Apply runs pending migrations in a single transaction.
+func Apply(ctx context.Context, db *sql.DB) error {
 	migrations, err := loadMigrations(migrationFS)
 	if err != nil {
 		return err
@@ -38,36 +46,23 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+schemaMigrationsTable+` (
-		version INTEGER PRIMARY KEY,
-		name TEXT NOT NULL,
-		applied_at TEXT NOT NULL
-	)`); err != nil {
+	if _, err := tx.ExecContext(ctx, bootstrapSQL); err != nil {
 		return fmt.Errorf("create schema migrations table: %w", err)
 	}
 
-	rows, err := tx.QueryContext(ctx, `SELECT version FROM `+schemaMigrationsTable)
+	queries := dbsql.New(tx)
+	versions, err := queries.ListSchemaMigrationVersions(ctx)
 	if err != nil {
 		return fmt.Errorf("list schema migrations: %w", err)
 	}
-	applied := make(map[int]struct{})
-	for rows.Next() {
-		var version int
-		if err := rows.Scan(&version); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan schema migration: %w", err)
-		}
+	applied := make(map[int64]struct{})
+	for _, version := range versions {
 		applied[version] = struct{}{}
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("list schema migrations: %w", err)
-	}
-	rows.Close()
 
-	known := make(map[int]struct{}, len(migrations))
+	known := make(map[int64]struct{}, len(migrations))
 	for _, m := range migrations {
-		known[m.version] = struct{}{}
+		known[int64(m.version)] = struct{}{}
 	}
 	for version := range applied {
 		if _, ok := known[version]; !ok {
@@ -77,11 +72,11 @@ func migrate(ctx context.Context, db *sql.DB) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, m := range migrations {
-		if _, ok := applied[m.version]; ok {
+		if _, ok := applied[int64(m.version)]; ok {
 			continue
 		}
 		for version := range applied {
-			if version > m.version {
+			if version > int64(m.version) {
 				return fmt.Errorf("database schema is missing version %d", m.version)
 			}
 		}
@@ -90,13 +85,12 @@ func migrate(ctx context.Context, db *sql.DB) error {
 				return fmt.Errorf("apply migration %d %s: %w", m.version, m.name, err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO `+schemaMigrationsTable+` (version, name, applied_at) VALUES (?, ?, ?)`,
-			m.version, m.name, now,
-		); err != nil {
+		if err := queries.RecordSchemaMigration(ctx, dbsql.RecordSchemaMigrationParams{
+			Version: int64(m.version), Name: m.name, AppliedAt: now,
+		}); err != nil {
 			return fmt.Errorf("record migration %d %s: %w", m.version, m.name, err)
 		}
-		applied[m.version] = struct{}{}
+		applied[int64(m.version)] = struct{}{}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit schema migration: %w", err)
@@ -105,7 +99,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 }
 
 func loadMigrations(fsys fs.FS) ([]migration, error) {
-	entries, err := fs.ReadDir(fsys, "migrations")
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return nil, fmt.Errorf("read migrations: %w", err)
 	}
@@ -130,7 +124,7 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 		if existing, ok := seen[version]; ok {
 			return nil, fmt.Errorf("duplicate migration version %d (%s and %s)", version, existing, entry.Name())
 		}
-		body, err := fs.ReadFile(fsys, "migrations/"+entry.Name())
+		body, err := fs.ReadFile(fsys, entry.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}

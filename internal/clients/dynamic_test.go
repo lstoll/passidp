@@ -10,30 +10,25 @@ import (
 	"testing"
 	"time"
 
+	"lds.li/oauth2ext/jwt"
 	"lds.li/oauth2ext/oidcclientreg"
 )
 
-func TestDynamicClients_GetClient(t *testing.T) {
+func TestDynamicClients_ClientMissing(t *testing.T) {
 	db := setupTestDB(t)
 
 	dc := &DynamicClients{DB: db}
 
 	// Test with non-dynamic client ID
-	client, found := dc.GetClient("static-client")
-	if found {
-		t.Error("expected static client to not be found")
-	}
-	if client != nil {
-		t.Error("expected static client to be nil")
+	client, err := dc.Client(context.Background(), "static-client")
+	if err != nil || client != nil {
+		t.Fatalf("Client(static-client) = %v, %v; want nil, nil", client, err)
 	}
 
 	// Test with dynamic client ID that doesn't exist
-	client, found = dc.GetClient("dc.nonexistent")
-	if found {
-		t.Error("expected nonexistent dynamic client to not be found")
-	}
-	if client != nil {
-		t.Error("expected nonexistent dynamic client to be nil")
+	client, err = dc.Client(context.Background(), "dc.nonexistent")
+	if err != nil || client != nil {
+		t.Fatalf("Client(dc.nonexistent) = %v, %v; want nil, nil", client, err)
 	}
 }
 
@@ -342,27 +337,21 @@ func TestDynamicClients_GetClientMetadata(t *testing.T) {
 	}
 }
 
-func TestDynamicClients_ClientOpts(t *testing.T) {
+func TestDynamicClients_Client(t *testing.T) {
 	db := setupTestDB(t)
 
 	dc := &DynamicClients{DB: db}
 
 	// Test with non-dynamic client ID
-	opts, err := dc.ClientOpts(context.Background(), "static-client")
-	if err != nil {
-		t.Errorf("expected no error for non-dynamic client, got: %v", err)
-	}
-	if len(opts) != 0 {
-		t.Errorf("expected no options for non-dynamic client, got %d options", len(opts))
+	client, err := dc.Client(context.Background(), "static-client")
+	if err != nil || client != nil {
+		t.Errorf("expected (nil, nil) for non-dynamic client, got %v, %v", client, err)
 	}
 
 	// Test with dynamic client ID that doesn't exist
-	opts, err = dc.ClientOpts(context.Background(), "dc.nonexistent")
-	if err != nil {
-		t.Errorf("expected no error for nonexistent dynamic client, got: %v", err)
-	}
-	if len(opts) != 0 {
-		t.Errorf("expected no options for nonexistent dynamic client, got %d options", len(opts))
+	client, err = dc.Client(context.Background(), "dc.nonexistent")
+	if err != nil || client != nil {
+		t.Errorf("expected (nil, nil) for nonexistent dynamic client, got %v, %v", client, err)
 	}
 
 	// Test with valid dynamic client - default algorithm (ES256)
@@ -371,14 +360,27 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	clientID := "dc.test-opts-default"
 	createTestDynamicClient(t, db, clientID, req)
 
-	opts, err = dc.ClientOpts(context.Background(), clientID)
-	if err != nil {
-		t.Fatalf("failed to get client options: %v", err)
+	client, err = dc.Client(context.Background(), clientID)
+	if err != nil || client == nil {
+		t.Fatalf("failed to get client: %v, %v", client, err)
 	}
-
-	// Should have 2 options: signing algorithm and PKCE skip
-	if len(opts) != 2 {
-		t.Errorf("expected 2 options (signing alg + PKCE skip), got %d", len(opts))
+	if client.ID != clientID {
+		t.Errorf("expected ID %q, got %q", clientID, client.ID)
+	}
+	if client.IDTokenSigningAlgorithm != jwt.ES256 {
+		t.Errorf("expected ES256, got %q", client.IDTokenSigningAlgorithm)
+	}
+	if !client.SkipPKCE {
+		t.Error("expected PKCE to be skipped for this registration")
+	}
+	if client.Public || client.PrivateKeyJWT != nil {
+		t.Errorf("expected a secret-authenticated client, got %+v", client)
+	}
+	if len(client.Secrets) != 1 || client.Secrets[0] == "" {
+		t.Errorf("expected one client secret, got %v", client.Secrets)
+	}
+	if len(client.RedirectURIs) != len(req.RedirectURIs) {
+		t.Errorf("expected redirect URIs %v, got %v", req.RedirectURIs, client.RedirectURIs)
 	}
 
 	// Stored RS256 registrations select the RS256 signer.
@@ -387,10 +389,10 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	clientIDRS256 := "dc.test-opts-rs256"
 	createTestDynamicClient(t, db, clientIDRS256, reqRS256)
 
-	if optsRS256, err := dc.ClientOpts(context.Background(), clientIDRS256); err != nil {
-		t.Fatalf("failed to get RS256 client options: %v", err)
-	} else if len(optsRS256) != 2 {
-		t.Errorf("expected 2 options for RS256 client, got %d", len(optsRS256))
+	if c, err := dc.Client(context.Background(), clientIDRS256); err != nil || c == nil {
+		t.Fatalf("failed to get RS256 client: %v, %v", c, err)
+	} else if c.IDTokenSigningAlgorithm != jwt.RS256 {
+		t.Errorf("expected RS256, got %q", c.IDTokenSigningAlgorithm)
 	}
 
 	// Test with valid dynamic client - explicit ES256 algorithm
@@ -399,14 +401,10 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	clientIDES256 := "dc.test-opts-es256"
 	createTestDynamicClient(t, db, clientIDES256, reqES256)
 
-	optsES256, err := dc.ClientOpts(context.Background(), clientIDES256)
-	if err != nil {
-		t.Fatalf("failed to get ES256 client options: %v", err)
-	}
-
-	// Should have 2 options: signing algorithm and PKCE skip
-	if len(optsES256) != 2 {
-		t.Errorf("expected 2 options for ES256 client, got %d", len(optsES256))
+	if c, err := dc.Client(context.Background(), clientIDES256); err != nil || c == nil {
+		t.Fatalf("failed to get ES256 client: %v, %v", c, err)
+	} else if c.IDTokenSigningAlgorithm != jwt.ES256 {
+		t.Errorf("expected ES256, got %q", c.IDTokenSigningAlgorithm)
 	}
 
 	// Test with invalid stored dynamic client algorithm.
@@ -415,7 +413,7 @@ func TestDynamicClients_ClientOpts(t *testing.T) {
 	clientIDUnsupported := "dc.test-opts-unsupported"
 	createTestDynamicClient(t, db, clientIDUnsupported, reqUnsupported)
 
-	if _, err := dc.ClientOpts(context.Background(), clientIDUnsupported); err == nil {
-		t.Fatal("expected unsupported algorithm client options to fail")
+	if _, err := dc.Client(context.Background(), clientIDUnsupported); err == nil {
+		t.Fatal("expected unsupported algorithm client to fail")
 	}
 }

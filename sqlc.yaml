@@ -1,0 +1,15 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/storage/migrations
+    queries: internal/storage/queries
+    gen:
+      go:
+        package: dbsql
+        out: internal/storage/dbsql
+        sql_package: database/sql
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: JSON
+            go_type: string

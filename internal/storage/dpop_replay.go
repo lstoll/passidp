@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"lds.li/oauth2ext/dpop"
+	"lds.li/passidp/internal/storage/dbsql"
 )
 
 // DPoPReplayStore records accepted DPoP proofs in SQLite so replay checks
@@ -30,34 +31,40 @@ func (s *DPoPReplayStore) CheckAndRecord(ctx context.Context, thumbprint, jti st
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	key := dpopReplayKey(thumbprint, jti)
-	now := time.Now()
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO dpop_replay (proof_key, until)
-		VALUES (?, ?)
-		ON CONFLICT(proof_key) DO UPDATE SET until = excluded.until
-		WHERE dpop_replay.until < ?`,
-		key[:], until, now)
+	// Keep the insert and expired-record replacement atomic with respect to GC.
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("record dpop proof: %w", err)
 	}
-	rows, err := result.RowsAffected()
+	defer tx.Rollback()
+	queries := dbsql.New(tx)
+	key := dpopReplayKey(thumbprint, jti)
+	now := time.Now()
+	rows, err := queries.InsertDPoPProof(ctx, dbsql.InsertDPoPProofParams{
+		ProofKey: key[:], Until: until,
+	})
 	if err != nil {
 		return fmt.Errorf("record dpop proof: %w", err)
 	}
 	if rows == 0 {
-		return dpop.ErrProofReplay
+		rows, err = queries.RefreshExpiredDPoPProof(ctx, dbsql.RefreshExpiredDPoPProofParams{
+			Until: until, ProofKey: key[:], Cutoff: now,
+		})
+		if err != nil {
+			return fmt.Errorf("record dpop proof: %w", err)
+		}
+		if rows == 0 {
+			return dpop.ErrProofReplay
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("record dpop proof: %w", err)
 	}
 	return nil
 }
 
 func (s *DPoPReplayStore) GarbageCollectExpiredProofs() (int, error) {
-	result, err := s.db.ExecContext(context.Background(), `
-		DELETE FROM dpop_replay WHERE until < ?`, time.Now())
-	if err != nil {
-		return 0, fmt.Errorf("delete expired dpop proofs: %w", err)
-	}
-	deleted, err := result.RowsAffected()
+	deleted, err := dbsql.New(s.db).GarbageCollectDPoPProofs(context.Background(), time.Now())
 	if err != nil {
 		return 0, fmt.Errorf("delete expired dpop proofs: %w", err)
 	}

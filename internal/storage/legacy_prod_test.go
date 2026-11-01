@@ -68,13 +68,9 @@ func TestImportProdCredentialsJSON(t *testing.T) {
 				if _, err := passkey.AAGUID(pk.Record); err != nil {
 					t.Errorf("%s: filippo parse: %v", pk.Name, err)
 				}
-				uv, err := passkey.UserVerificationAvailable(pk.Record)
-				if err != nil {
-					t.Errorf("%s: UV available: %v", pk.Name, err)
-					continue
-				}
-				if !uv {
-					t.Errorf("%s: user verification not available on imported record", pk.Name)
+				flags := parseAuthData(t, authDataFromRecord(t, pk.Record))
+				if flags.userPresent && !flags.userVerified {
+					t.Errorf("%s: imported record has UP without UV and cannot support passwordless login", pk.Name)
 				}
 			}
 		}

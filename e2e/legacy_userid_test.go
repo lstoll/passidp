@@ -156,7 +156,7 @@ func enrollAndRegister(t *testing.T, h *e2eHarness, userID, keyName string) {
 
 func loginOIDC(t *testing.T, h *e2eHarness) *oauth2.Token {
 	t.Helper()
-	tokC, loginErrC := cliLoginFlow(h.ctx, t, h.oa2Cfg)
+	tokC, loginErrC := cliLoginFlow(h.ctx, t, h.oa2Cfg, h.clientType)
 
 	select {
 	case tok := <-tokC:

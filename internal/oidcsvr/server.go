@@ -9,12 +9,12 @@ import (
 	"time"
 	"uuid"
 
-	"lds.li/oauth2ext/oauth2as"
-	"lds.li/oauth2ext/oauth2as/discovery"
-	"lds.li/oauth2ext/oauth2as/oauth2proto"
 	"lds.li/passidp/internal/appsession"
 	"lds.li/passidp/internal/auth"
 	"lds.li/passidp/internal/config"
+	"lds.li/passidp/internal/oauth2as"
+	"lds.li/passidp/internal/oauth2as/discovery"
+	"lds.li/passidp/internal/oauth2as/oauth2proto"
 	"lds.li/passidp/internal/policy"
 	"lds.li/passidp/internal/ratelimit"
 	"lds.li/web"
@@ -25,7 +25,7 @@ type Server struct {
 	Auth      *auth.Authenticator
 	OAuth2AS  *oauth2as.Server
 	Discovery *discovery.OIDCConfigurationHandler
-	Clients   ClientSource
+	Clients   oauth2as.ClientSource
 	Config    *config.Config
 	Policy    *policy.PolicyEvaluator
 }
@@ -99,8 +99,11 @@ func (s *Server) HandleAuthorizationRequestReturn(ctx context.Context, w web.Res
 
 func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest, userID uuid.UUID) (returnTo string, _ error) {
 	// Get client configuration
-	client, found := s.Clients.GetClient(request.ClientID)
-	if !found {
+	client, err := s.Clients.Client(ctx, request.ClientID)
+	if err != nil {
+		return "", fmt.Errorf("get client: %w", err)
+	}
+	if client == nil {
 		return "", httperror.BadRequestErrf("client %s not found", request.ClientID)
 	}
 
@@ -110,8 +113,8 @@ func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest,
 	}
 
 	// Check authorization policy if specified
-	if s.Policy != nil && client.AuthorizationPolicy() != "" {
-		authorized, err := s.Policy.EvaluateAuthorization(client.AuthorizationPolicy(), user)
+	if s.Policy != nil && client.AuthorizationPolicy != "" {
+		authorized, err := s.Policy.EvaluateAuthorization(client.AuthorizationPolicy, user)
 		if err != nil {
 			return "", fmt.Errorf("evaluate authorization policy: %w", err)
 		}
@@ -135,8 +138,8 @@ func (s *Server) createGrant(ctx context.Context, request *oauth2as.AuthRequest,
 	if authTime, ok := auth.AuthTimeFromContext(ctx); ok {
 		grant.AuthenticatedAt = authTime
 	}
-	if client.GrantValidity() != nil {
-		grant.ExpiresAt = time.Now().Add(*client.GrantValidity())
+	if client.GrantValidity != 0 {
+		grant.ExpiresAt = time.Now().Add(client.GrantValidity)
 	}
 
 	slog.InfoContext(ctx, "granting auth", "client-id", request.ClientID, "user-id", userID.String(), "scopes", request.Scopes, "grant-expires-at", grant.ExpiresAt)
@@ -177,6 +180,17 @@ func authTimeExceeded(ctx context.Context, authReq *oauth2as.AuthRequest) bool {
 func writeOAuth2ProtoError(w web.ResponseWriter, r *web.Request, err error) error {
 	if _, ok := errors.AsType[*oauth2proto.AuthError](err); ok {
 		_ = oauth2proto.WriteError(w, r.RawRequest(), err)
+		return nil
+	}
+	// The web error handler doesn't recognise oauth2proto.HTTPError and would
+	// turn it into a 500, so write it here with its own status code.
+	if herr, ok := errors.AsType[*oauth2proto.HTTPError](err); ok {
+		level := slog.LevelWarn
+		if herr.Code == 0 || herr.Code >= http.StatusInternalServerError {
+			level = slog.LevelError
+		}
+		slog.Log(r.RawRequest().Context(), level, "oauth2 request failed", "err", err, "path", r.URL().Path)
+		_ = oauth2proto.WriteError(w, r.RawRequest(), herr)
 		return nil
 	}
 	return err

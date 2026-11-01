@@ -3,11 +3,12 @@ package clients
 import (
 	"context"
 
-	"lds.li/oauth2ext/oauth2as"
 	"lds.li/oauth2ext/oidcclientreg"
-	"lds.li/passidp/internal/oidcsvr"
+	"lds.li/passidp/internal/oauth2as"
 	"lds.li/web"
 )
+
+var _ oauth2as.ClientSource = (*MultiClients)(nil)
 
 // MultiClients combines multiple client sources, with static clients taking precedence
 type MultiClients struct {
@@ -23,68 +24,21 @@ func NewMultiClients(static *StaticClients, dynamic *DynamicClients) *MultiClien
 	}
 }
 
-// GetClient implements the ClientSource interface
-// Static clients take precedence over dynamic clients
-func (m *MultiClients) GetClient(clientID string) (oidcsvr.Client, bool) {
-	// First try static clients
-	if client, found := m.Static.GetClient(clientID); found {
-		return client, true
+// Client implements oauth2as.ClientSource. Static clients take precedence: if
+// the static source has the ID, it is returned and the dynamic source is never
+// consulted. Otherwise a same-ID dynamic client could change the
+// authentication mode of a static client (e.g. private_key_jwt to secret).
+func (m *MultiClients) Client(ctx context.Context, clientID string) (*oauth2as.Client, error) {
+	if m.Static != nil {
+		client, err := m.Static.Client(ctx, clientID)
+		if err != nil || client != nil {
+			return client, err
+		}
 	}
-
-	// Then try dynamic clients
-	if client, found := m.Dynamic.GetClient(clientID); found {
-		return client, true
+	if m.Dynamic != nil {
+		return m.Dynamic.Client(ctx, clientID)
 	}
-
-	return nil, false
-}
-
-// IsValidClientID implements oauth2as.ClientSource
-func (m *MultiClients) IsValidClientID(ctx context.Context, clientID string) (bool, error) {
-	// Check static clients first
-	if ok, err := m.Static.IsValidClientID(ctx, clientID); err != nil {
-		return false, err
-	} else if ok {
-		return true, nil
-	}
-
-	// Then check dynamic clients
-	return m.Dynamic.IsValidClientID(ctx, clientID)
-}
-
-// ClientOpts implements oauth2as.ClientSource
-func (m *MultiClients) ClientOpts(ctx context.Context, clientID string) ([]oauth2as.ClientOpt, error) {
-	// Check static clients first
-	if opts, err := m.Static.ClientOpts(ctx, clientID); err != nil {
-		return nil, err
-	} else if len(opts) > 0 {
-		return opts, nil
-	}
-
-	// Then check dynamic clients
-	return m.Dynamic.ClientOpts(ctx, clientID)
-}
-
-// ClientSecrets implements oauth2as.ClientSource
-func (m *MultiClients) ClientSecrets(ctx context.Context, clientID string) ([]string, error) {
-	// Check static clients first
-	if secrets, err := m.Static.ClientSecrets(ctx, clientID); err == nil && len(secrets) > 0 {
-		return secrets, nil
-	}
-
-	// Then check dynamic clients
-	return m.Dynamic.ClientSecrets(ctx, clientID)
-}
-
-// RedirectURIs implements oauth2as.ClientSource
-func (m *MultiClients) RedirectURIs(ctx context.Context, clientID string) ([]string, error) {
-	// Check static clients first
-	if uris, err := m.Static.RedirectURIs(ctx, clientID); err == nil && len(uris) > 0 {
-		return uris, nil
-	}
-
-	// Then check dynamic clients
-	return m.Dynamic.RedirectURIs(ctx, clientID)
+	return nil, nil
 }
 
 // GetClientMetadata returns the parsed client registration metadata for a given client ID

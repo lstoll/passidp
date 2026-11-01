@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"lds.li/passidp/internal/storage/dbsql"
 )
 
 var (
@@ -16,7 +18,7 @@ var (
 
 // DynamicClientStore persists dynamically registered OIDC clients in SQLite.
 type DynamicClientStore struct {
-	db *sql.DB
+	queries *dbsql.Queries
 }
 
 // DynamicClient is a dynamically registered OIDC client.
@@ -31,7 +33,7 @@ type DynamicClient struct {
 
 // NewDynamicClientStore returns a SQL-backed dynamic client store.
 func NewDynamicClientStore(sqlDB *sql.DB) *DynamicClientStore {
-	return &DynamicClientStore{db: sqlDB}
+	return &DynamicClientStore{queries: dbsql.New(sqlDB)}
 }
 
 func (s *DynamicClientStore) GetDynamicClient(ctx context.Context, id string) (DynamicClient, error) {
@@ -54,10 +56,10 @@ func (s *DynamicClientStore) CreateDynamicClient(ctx context.Context, id, client
 		return fmt.Errorf("check existing client: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO dynamic_clients (id, active, expires_at, created_at, client_secret, registration_blob)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		id, true, expiresAt, time.Now(), clientSecret, json.RawMessage(registrationBlob))
+	err = s.queries.CreateDynamicClient(ctx, dbsql.CreateDynamicClientParams{
+		ID: id, Active: true, ExpiresAt: expiresAt, CreatedAt: time.Now(),
+		ClientSecret: clientSecret, RegistrationBlob: registrationBlob,
+	})
 	return err
 }
 
@@ -66,75 +68,42 @@ func (s *DynamicClientStore) DeactivateDynamicClient(ctx context.Context, id str
 		return err
 	}
 
-	_, err := s.db.ExecContext(ctx, `UPDATE dynamic_clients SET active = false WHERE id = ?`, id)
-	return err
+	return s.queries.DeactivateDynamicClient(ctx, id)
 }
 
 func (s *DynamicClientStore) ListActiveDynamicClients(ctx context.Context) ([]DynamicClient, error) {
-	rows, err := s.db.QueryContext(ctx, dynamicClientSelect+`
-		WHERE active = true AND expires_at > ?
-		ORDER BY created_at DESC`, time.Now())
+	rows, err := s.queries.ListActiveDynamicClients(ctx, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("list active dynamic clients: %w", err)
 	}
-	defer rows.Close()
-
 	var clients []DynamicClient
-	for rows.Next() {
-		row, err := scanDynamicClient(rows)
-		if err != nil {
-			return nil, fmt.Errorf("list active dynamic clients: %w", err)
-		}
-		clients = append(clients, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list active dynamic clients: %w", err)
+	for _, row := range rows {
+		clients = append(clients, convertDynamicClient(row))
 	}
 	return clients, nil
 }
 
 func (s *DynamicClientStore) CleanupExpiredDynamicClients() (int, error) {
-	result, err := s.db.ExecContext(context.Background(), `
-		DELETE FROM dynamic_clients WHERE active = false OR expires_at < ?`, time.Now())
-	if err != nil {
-		return 0, fmt.Errorf("delete expired dynamic clients: %w", err)
-	}
-	deleted, err := result.RowsAffected()
+	deleted, err := s.queries.CleanupExpiredDynamicClients(context.Background(), time.Now())
 	if err != nil {
 		return 0, fmt.Errorf("delete expired dynamic clients: %w", err)
 	}
 	return int(deleted), nil
 }
 
-const dynamicClientSelect = `
-	SELECT id, active, expires_at, created_at, client_secret, registration_blob
-	FROM dynamic_clients`
-
 func (s *DynamicClientStore) getDynamicClientRow(ctx context.Context, id string) (DynamicClient, error) {
-	row, err := scanDynamicClient(s.db.QueryRowContext(ctx, dynamicClientSelect+`
-		WHERE id = ?`, id))
+	row, err := s.queries.GetDynamicClientByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return DynamicClient{}, ErrDynamicClientNotFound
 		}
 		return DynamicClient{}, fmt.Errorf("get dynamic client: %w", err)
 	}
-	return row, nil
+	return convertDynamicClient(row), nil
 }
 
-type dynamicClientScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanDynamicClient(s dynamicClientScanner) (DynamicClient, error) {
-	var c DynamicClient
-	err := s.Scan(
-		&c.ID,
-		&c.Active,
-		&c.ExpiresAt,
-		&c.CreatedAt,
-		&c.ClientSecret,
-		&c.RegistrationBlob,
-	)
-	return c, err
+func convertDynamicClient(row dbsql.DynamicClient) DynamicClient {
+	return DynamicClient{ID: row.ID, Active: row.Active, ExpiresAt: row.ExpiresAt,
+		CreatedAt: row.CreatedAt, ClientSecret: row.ClientSecret,
+		RegistrationBlob: json.RawMessage(row.RegistrationBlob)}
 }

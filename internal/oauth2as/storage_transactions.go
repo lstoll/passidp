@@ -2,6 +2,7 @@ package oauth2as
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -59,12 +60,14 @@ func (s *Storage) createGrantWithAuthCode(ctx context.Context, grant *storedGran
 }
 
 // exchangeCode validates the grant snapshot and consumes the code in one commit.
-func (s *Storage) exchangeCode(ctx context.Context, loaded *loadedGrant, prepared *preparedTokenResponse) error {
+func (s *Storage) exchangeCode(ctx context.Context, loaded *loadedGrant, prepared *preparedTokenResponse, now time.Time) error {
 	return s.transact(ctx, func(q *dbsql.Queries) error {
 		if err := advanceGrantRevision(ctx, q, loaded.grant); err != nil {
 			return err
 		}
-		rows, err := q.ConsumeOAuthAuthCode(ctx, dbsql.ConsumeOAuthAuthCodeParams{ID: loaded.authCode.ID, GrantID: loaded.grant.ID})
+		rows, err := q.ConsumeOAuthAuthCode(ctx, dbsql.ConsumeOAuthAuthCodeParams{
+			ID: loaded.authCode.ID, GrantID: loaded.grant.ID, ConsumedAt: sql.NullInt64{Int64: now.UnixMicro(), Valid: true},
+		})
 		if err != nil {
 			return err
 		}

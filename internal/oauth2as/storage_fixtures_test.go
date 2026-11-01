@@ -123,12 +123,14 @@ func updateGrantFixture(ctx context.Context, tx *sql.Tx, value storedGrant) erro
 func (s *Storage) getAuthCode(ctx context.Context, id string) (*storedAuthCode, error) {
 	var grantID string
 	var validUntil, deleteAfter int64
-	err := s.db.QueryRowContext(ctx, `SELECT grant_id, valid_until, delete_after FROM oauth2as_authorization_codes WHERE id = ?`, id).
-		Scan(&grantID, &validUntil, &deleteAfter)
+	var consumedAt sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT grant_id, valid_until, delete_after, consumed_at FROM oauth2as_authorization_codes WHERE id = ?`, id).
+		Scan(&grantID, &validUntil, &deleteAfter, &consumedAt)
 	if err != nil {
 		return nil, storageReadError(err)
 	}
-	return &storedAuthCode{ID: id, GrantID: grantID, ValidUntil: timeFromMicros(validUntil), StorageExpiresAt: timeFromMicros(deleteAfter)}, nil
+	return &storedAuthCode{ID: id, GrantID: grantID, ValidUntil: timeFromMicros(validUntil),
+		StorageExpiresAt: timeFromMicros(deleteAfter), Consumed: consumedAt.Valid}, nil
 }
 
 func (s *Storage) getRefreshToken(ctx context.Context, id string) (*storedRefreshToken, error) {

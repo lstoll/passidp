@@ -171,8 +171,20 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		return nil, err
 	}
 
-	// Reject if PKCE is required but no code verifier was provided
-	if !client.SkipPKCE && treq.CodeVerifier == "" {
+	// A second use of a code means it leaked or was replayed. Deny it and revoke
+	// the grant and every token issued from it (RFC 6749 section 4.1.2). This
+	// runs after client authentication so only the client can trigger it.
+	if loadedGrant.authCode.Consumed {
+		if err := s.config.Storage.expireGrant(ctx, loadedGrant.grant.ID); err != nil {
+			return nil, fmt.Errorf("failed to revoke grant on authorization code reuse: %w", err)
+		}
+		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "invalid code"}
+	}
+
+	// A verifier is required unless the client may skip PKCE and the
+	// authorization request did not start it. Once a challenge was sent it
+	// must always be satisfied, so PKCE cannot be downgraded at exchange.
+	if treq.CodeVerifier == "" && (!client.SkipPKCE || loadedGrant.grant.CodeChallenge != "") {
 		return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeUnauthorizedClient, Description: "PKCE required, but code verifier not passed"}
 	}
 
@@ -189,10 +201,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 	// mutations, so a valid proof is consumed even if later work fails.
 	dpopProof, err := s.verifyDPoPProof(s.config.Issuer, req, nil, "")
 	if err != nil {
-		if errors.Is(err, dpop.ErrProofReplay) {
-			return nil, invalidDPoPProofError(err)
-		}
-		return nil, err
+		return nil, invalidDPoPProofError(err)
 	}
 	var dpopThumbprint string
 	if dpopProof != nil {
@@ -209,7 +218,7 @@ func (s *Server) codeToken(ctx context.Context, req *http.Request, treq *oauth2p
 		return nil, err
 	}
 
-	if err := s.config.Storage.exchangeCode(ctx, loadedGrant, prepared); err != nil {
+	if err := s.config.Storage.exchangeCode(ctx, loadedGrant, prepared, s.now()); err != nil {
 		if errors.Is(err, errStorageConflict) {
 			return nil, &oauth2proto.TokenError{ErrorCode: oauth2proto.TokenErrorCodeInvalidGrant, Description: "authorization code already used"}
 		}

@@ -21,7 +21,9 @@ CREATE TABLE oauth2as_authorization_codes (
     id TEXT PRIMARY KEY,
     grant_id TEXT NOT NULL REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
     valid_until INTEGER NOT NULL,
-    delete_after INTEGER NOT NULL
+    delete_after INTEGER NOT NULL,
+    -- Set on exchange. Consumed codes are retained so reuse can be detected.
+    consumed_at INTEGER
 );
 
 CREATE TABLE oauth2as_refresh_tokens (

@@ -23,6 +23,7 @@ type Oauth2asAuthorizationCode struct {
 	GrantID     string
 	ValidUntil  int64
 	DeleteAfter int64
+	ConsumedAt  sql.NullInt64
 }
 
 type Oauth2asGrant struct {

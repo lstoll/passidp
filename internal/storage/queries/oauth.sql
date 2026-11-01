@@ -84,7 +84,8 @@ FROM oauth2as_refresh_tokens t JOIN oauth2as_grants g ON g.id = t.grant_id
 WHERE t.id = ?;
 
 -- name: ConsumeOAuthAuthCode :execrows
-DELETE FROM oauth2as_authorization_codes WHERE id = sqlc.arg(id) AND grant_id = sqlc.arg(grant_id);
+UPDATE oauth2as_authorization_codes SET consumed_at = sqlc.arg(consumed_at)
+WHERE id = sqlc.arg(id) AND grant_id = sqlc.arg(grant_id) AND consumed_at IS NULL;
 
 -- name: RevokeOAuthGrantForUser :execrows
 DELETE FROM oauth2as_grants WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id);

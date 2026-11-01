@@ -21,8 +21,10 @@ type storedAuthCode struct {
 	// ValidUntil is the time at which the code is no longer valid for use.
 	ValidUntil time.Time
 	// StorageExpiresAt is the time at which the code can be deleted from storage.
-	// This is typically after ValidUntil to allow for cleanup.
+	// It matches the grant expiry so reuse can be detected for the grant's life.
 	StorageExpiresAt time.Time
+	// Consumed reports whether the code has already been exchanged.
+	Consumed bool
 }
 
 // storedRefreshToken represents a refresh token that can be used to obtain new

@@ -42,13 +42,13 @@ func (s *Server) getGrantFromAuthCode(ctx context.Context, presentedCode string)
 	}
 
 	// StorageExpiresAt is only a cleanup horizon; ValidUntil is the protocol
-	// lifetime and must always be enforced by this package.
+	// lifetime and must always be enforced by this package. A consumed code is
+	// returned regardless of ValidUntil so the caller can treat it as reuse.
 	now := s.now()
-	if !storedCode.ValidUntil.After(now) || !storedCode.StorageExpiresAt.After(now) {
+	if !grant.ExpiresAt.After(now) || !storedCode.StorageExpiresAt.After(now) {
 		return nil, errGrantExpired
 	}
-
-	if !grant.ExpiresAt.After(now) {
+	if !storedCode.Consumed && !storedCode.ValidUntil.After(now) {
 		return nil, errGrantExpired
 	}
 
@@ -105,7 +105,7 @@ func (s *Server) putGrantWithAuthCode(ctx context.Context, loadedGrant *loadedGr
 		ID:               cid,
 		GrantID:          grid,
 		ValidUntil:       codeExpiresAt,
-		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Keep code around as long as the grant
+		StorageExpiresAt: loadedGrant.grant.ExpiresAt, // Retained after use for reuse detection.
 	}
 	loadedGrant.grant.ID = grid
 	if err := s.config.Storage.createGrantWithAuthCode(ctx, loadedGrant.grant, storedCode); err != nil {

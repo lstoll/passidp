@@ -111,16 +111,18 @@ func (q *Queries) CleanupOAuthRefreshTokens(ctx context.Context, arg CleanupOAut
 }
 
 const consumeOAuthAuthCode = `-- name: ConsumeOAuthAuthCode :execrows
-DELETE FROM oauth2as_authorization_codes WHERE id = ?1 AND grant_id = ?2
+UPDATE oauth2as_authorization_codes SET consumed_at = ?1
+WHERE id = ?2 AND grant_id = ?3 AND consumed_at IS NULL
 `
 
 type ConsumeOAuthAuthCodeParams struct {
-	ID      string
-	GrantID string
+	ConsumedAt sql.NullInt64
+	ID         string
+	GrantID    string
 }
 
 func (q *Queries) ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, consumeOAuthAuthCode, arg.ID, arg.GrantID)
+	result, err := q.db.ExecContext(ctx, consumeOAuthAuthCode, arg.ConsumedAt, arg.ID, arg.GrantID)
 	if err != nil {
 		return 0, err
 	}
@@ -155,7 +157,7 @@ func (q *Queries) DeleteOAuthRefreshToken(ctx context.Context, id string) error 
 }
 
 const getOAuthAuthCodeAndGrant = `-- name: GetOAuthAuthCodeAndGrant :one
-SELECT c.id, c.grant_id, c.valid_until, c.delete_after, g.id, g.user_id, g.client_id, g.granted_scopes, g.redirect_uri, g.code_challenge, g.nonce, g.max_age, g.granted_at, g.authenticated_at, g.expires_at, g.dpop_thumbprint, g.acr, g.amr, g.version
+SELECT c.id, c.grant_id, c.valid_until, c.delete_after, c.consumed_at, g.id, g.user_id, g.client_id, g.granted_scopes, g.redirect_uri, g.code_challenge, g.nonce, g.max_age, g.granted_at, g.authenticated_at, g.expires_at, g.dpop_thumbprint, g.acr, g.amr, g.version
 FROM oauth2as_authorization_codes c JOIN oauth2as_grants g ON g.id = c.grant_id
 WHERE c.id = ?
 `
@@ -173,6 +175,7 @@ func (q *Queries) GetOAuthAuthCodeAndGrant(ctx context.Context, id string) (GetO
 		&i.Oauth2asAuthorizationCode.GrantID,
 		&i.Oauth2asAuthorizationCode.ValidUntil,
 		&i.Oauth2asAuthorizationCode.DeleteAfter,
+		&i.Oauth2asAuthorizationCode.ConsumedAt,
 		&i.Oauth2asGrant.ID,
 		&i.Oauth2asGrant.UserID,
 		&i.Oauth2asGrant.ClientID,

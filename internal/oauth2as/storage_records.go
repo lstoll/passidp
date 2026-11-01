@@ -21,7 +21,8 @@ func (s *Storage) getAuthCodeAndGrant(ctx context.Context, id string) (*storedAu
 		return nil, nil, err
 	}
 	code := row.Oauth2asAuthorizationCode
-	return &storedAuthCode{ID: code.ID, GrantID: code.GrantID, ValidUntil: timeFromMicros(code.ValidUntil), StorageExpiresAt: timeFromMicros(code.DeleteAfter)}, grant, nil
+	return &storedAuthCode{ID: code.ID, GrantID: code.GrantID, ValidUntil: timeFromMicros(code.ValidUntil),
+		StorageExpiresAt: timeFromMicros(code.DeleteAfter), Consumed: code.ConsumedAt.Valid}, grant, nil
 }
 
 func (s *Storage) getRefreshTokenAndGrant(ctx context.Context, id string) (*storedRefreshToken, *storedGrant, error) {

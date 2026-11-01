@@ -182,5 +182,16 @@ func writeOAuth2ProtoError(w web.ResponseWriter, r *web.Request, err error) erro
 		_ = oauth2proto.WriteError(w, r.RawRequest(), err)
 		return nil
 	}
+	// The web error handler doesn't recognise oauth2proto.HTTPError and would
+	// turn it into a 500, so write it here with its own status code.
+	if herr, ok := errors.AsType[*oauth2proto.HTTPError](err); ok {
+		level := slog.LevelWarn
+		if herr.Code == 0 || herr.Code >= http.StatusInternalServerError {
+			level = slog.LevelError
+		}
+		slog.Log(r.RawRequest().Context(), level, "oauth2 request failed", "err", err, "path", r.URL().Path)
+		_ = oauth2proto.WriteError(w, r.RawRequest(), herr)
+		return nil
+	}
 	return err
 }

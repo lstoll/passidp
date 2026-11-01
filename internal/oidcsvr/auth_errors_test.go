@@ -47,6 +47,28 @@ func TestWriteOAuth2ProtoError(t *testing.T) {
 		}
 	})
 
+	t.Run("http error keeps its status", func(t *testing.T) {
+		rw := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/authorization", nil)
+		br := web.NewRequestFrom(req)
+		w := web.NewResponseWriter(rw)
+
+		err := &oauth2proto.HTTPError{
+			Code:     http.StatusBadRequest,
+			Message:  "unknown client",
+			CauseMsg: "client ID nope is not valid",
+		}
+		if got := writeOAuth2ProtoError(w, br, err); got != nil {
+			t.Fatalf("writeOAuth2ProtoError() = %v, want nil", got)
+		}
+		if rw.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", rw.Code, http.StatusBadRequest)
+		}
+		if body := rw.Body.String(); body != "unknown client\n" {
+			t.Fatalf("body = %q, want %q", body, "unknown client\n")
+		}
+	})
+
 	t.Run("non-auth error passes through", func(t *testing.T) {
 		rw := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/authorization", nil)

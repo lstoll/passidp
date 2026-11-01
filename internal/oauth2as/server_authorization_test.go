@@ -602,11 +602,10 @@ func TestGrantAuthInvalidClientOrRedirectDoesNotWrite(t *testing.T) {
 	}
 }
 
-func authorizationStorageCounts(t *testing.T, storage *Storage) [5]int64 {
+func authorizationStorageCounts(t *testing.T, storage *Storage) [4]int64 {
 	t.Helper()
-	var counts [5]int64
+	var counts [4]int64
 	tables := [...]string{
-		tblSchemaMigrations,
 		tblGrants,
 		tblAuthCodes,
 		tblRefreshTokens,

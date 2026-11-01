@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"lds.li/passidp/internal/storage/migrations"
 	_ "modernc.org/sqlite"
 )
 
@@ -53,7 +54,7 @@ func openDB(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping sqlite database: %w", err)
 	}
 
-	if err := migrate(context.Background(), sqlDB); err != nil {
+	if err := migrations.Apply(context.Background(), sqlDB); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}

@@ -62,7 +62,7 @@ func (c *ServeCmd) Run(ctx context.Context, config *config.Config, paths admincl
 		return fmt.Errorf("open sqlite state from %s: %w", sqlPath, err)
 	}
 
-	oauth2Store, err := storage.NewOAuth2Storage(ctx, sqlDB)
+	oauth2Store, err := oauth2as.NewSQLStorage(sqlDB)
 	if err != nil {
 		return fmt.Errorf("create oauth2 storage: %w", err)
 	}

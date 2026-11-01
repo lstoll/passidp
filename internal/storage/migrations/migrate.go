@@ -1,4 +1,5 @@
-package storage
+// Package migrations applies the shared PassIDP SQLite schema.
+package migrations
 
 import (
 	"context"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-//go:embed migrations/*.sql
+//go:embed *.sql
 var migrationFS embed.FS
 
 const schemaMigrationsTable = "schema_migrations"
@@ -26,7 +27,8 @@ type migration struct {
 	stmts   []string
 }
 
-func migrate(ctx context.Context, db *sql.DB) error {
+// Apply runs pending migrations in a single transaction.
+func Apply(ctx context.Context, db *sql.DB) error {
 	migrations, err := loadMigrations(migrationFS)
 	if err != nil {
 		return err
@@ -105,7 +107,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 }
 
 func loadMigrations(fsys fs.FS) ([]migration, error) {
-	entries, err := fs.ReadDir(fsys, "migrations")
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return nil, fmt.Errorf("read migrations: %w", err)
 	}
@@ -130,7 +132,7 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 		if existing, ok := seen[version]; ok {
 			return nil, fmt.Errorf("duplicate migration version %d (%s and %s)", version, existing, entry.Name())
 		}
-		body, err := fs.ReadFile(fsys, "migrations/"+entry.Name())
+		body, err := fs.ReadFile(fsys, entry.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}

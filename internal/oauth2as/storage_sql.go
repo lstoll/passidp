@@ -13,25 +13,16 @@ import (
 
 // OAuth tables share a database with other PassIDP state.
 const (
-	tblSchemaMigrations = "oauth2as_schema_migrations"
-	tblGrants           = "oauth2as_grants"
-	tblAuthCodes        = "oauth2as_authorization_codes"
-	tblRefreshTokens    = "oauth2as_refresh_tokens"
-	tblRefreshSessions  = "oauth2as_refresh_sessions"
-	idxGrantOwner       = "oauth2as_grant_owner_idx"
-	idxGrantExpiry      = "oauth2as_grant_expiry_idx"
-	idxCodeExpiry       = "oauth2as_code_expiry_idx"
-	idxCodeGrant        = "oauth2as_code_grant_idx"
-	idxTokenExpiry      = "oauth2as_token_expiry_idx"
-	idxTokenGrant       = "oauth2as_token_grant_idx"
-	idxSessionActive    = "oauth2as_session_active_idx"
+	tblGrants          = "oauth2as_grants"
+	tblAuthCodes       = "oauth2as_authorization_codes"
+	tblRefreshTokens   = "oauth2as_refresh_tokens"
+	tblRefreshSessions = "oauth2as_refresh_sessions"
 )
 
 // Storage holds SQLite authorization-server state for one issuer.
 // Construct it with [NewSQLStorage].
 type Storage struct {
-	db         *sql.DB
-	migrations []sqlMigration
+	db *sql.DB
 
 	// commitHook, if set, is called before each Commit and aborts it with the
 	// returned error. It is a test seam for fault injection.
@@ -39,13 +30,12 @@ type Storage struct {
 }
 
 // NewSQLStorage returns SQLite-backed storage using db. It does not connect to
-// the database or apply migrations. Call [Storage.Migrate] before serving
-// traffic.
+// the database or apply migrations. Use a database opened by storage.Open.
 func NewSQLStorage(db *sql.DB) (*Storage, error) {
 	if db == nil {
 		return nil, errors.New("oauth2as: SQL database is required")
 	}
-	return &Storage{db: db, migrations: sqlMigrations()}, nil
+	return &Storage{db: db}, nil
 }
 
 func (s *Storage) conn(ctx context.Context) (*sql.Conn, error) {
@@ -495,166 +485,6 @@ func (s *Storage) hasExpired(ctx context.Context, tx *sql.Tx, cutoff any) (bool,
 	var exists bool
 	err := tx.QueryRowContext(ctx, query, cutoff, cutoff, cutoff, cutoff).Scan(&exists)
 	return exists, err
-}
-
-type sqlMigration struct {
-	version int
-	name    string
-	up      []string
-}
-
-// Migrate applies pending schema migrations. It is safe to call on every process start.
-// The version 3 upgrade discards existing OAuth grants, codes, tokens, and sessions.
-func (s *Storage) Migrate(ctx context.Context) error {
-	var err error
-	for attempt := range 4 {
-		err = s.migrateOnce(ctx)
-		if err == nil || !retryableSQLError(err) {
-			return err
-		}
-		if attempt == 3 {
-			break
-		}
-		delay := time.Duration(1<<attempt) * time.Millisecond
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return err
-}
-
-func (s *Storage) migrateOnce(ctx context.Context) error {
-	conn, err := s.conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	tx, err := conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS "+tblSchemaMigrations+" ("+
-		"version BIGINT PRIMARY KEY, "+
-		"name TEXT NOT NULL, "+
-		"applied_at INTEGER NOT NULL"+
-		")"); err != nil {
-		return fmt.Errorf("create schema migrations table: %w", err)
-	}
-
-	rows, err := tx.QueryContext(ctx, "SELECT version FROM "+tblSchemaMigrations)
-	if err != nil {
-		return err
-	}
-	applied := make(map[int]struct{})
-	for rows.Next() {
-		var version int
-		if err := rows.Scan(&version); err != nil {
-			rows.Close()
-			return err
-		}
-		applied[version] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-
-	// Versions 1 and 2 are replaced by the transactional reset in version 3.
-	known := map[int]struct{}{1: {}, 2: {}}
-	for _, migration := range s.migrations {
-		known[migration.version] = struct{}{}
-	}
-	for version := range applied {
-		if _, ok := known[version]; !ok {
-			return fmt.Errorf("oauth2as: database schema version %d is newer than this library", version)
-		}
-	}
-
-	now := time.Now()
-	for _, migration := range s.migrations {
-		if _, ok := applied[migration.version]; ok {
-			continue
-		}
-		for _, statement := range migration.up {
-			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("apply migration %d %s: %w", migration.version, migration.name, err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO "+tblSchemaMigrations+" (version, name, applied_at) VALUES (?, ?, ?)",
-			migration.version, migration.name, s.timeOf(&now)); err != nil {
-			return fmt.Errorf("record migration %d %s: %w", migration.version, migration.name, err)
-		}
-	}
-	return tx.Commit()
-}
-
-func sqlMigrations() []sqlMigration {
-	return []sqlMigration{{
-		version: 3,
-		name:    "token_digest_schema",
-		// Existing OAuth grants and tokens are intentionally discarded. The reset is
-		// transactional and runs once; other tables in the shared database are untouched.
-		up: []string{
-			"DROP TABLE IF EXISTS " + tblRefreshSessions,
-			"DROP TABLE IF EXISTS " + tblRefreshTokens,
-			"DROP TABLE IF EXISTS " + tblAuthCodes,
-			"DROP TABLE IF EXISTS " + tblGrants,
-			`CREATE TABLE oauth2as_grants (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    client_id TEXT NOT NULL,
-    granted_scopes JSON NOT NULL,
-    redirect_uri TEXT NOT NULL,
-    code_challenge TEXT NOT NULL,
-    nonce TEXT NOT NULL,
-    max_age INTEGER,
-    granted_at INTEGER NOT NULL,
-    authenticated_at INTEGER,
-    expires_at INTEGER NOT NULL,
-    dpop_thumbprint TEXT NOT NULL,
-    acr TEXT NOT NULL,
-    amr JSON NOT NULL,
-    version INTEGER NOT NULL CHECK (version > 0)
-   )`,
-			"CREATE INDEX " + idxGrantOwner + " ON " + tblGrants + " (user_id, client_id, id)",
-			"CREATE INDEX " + idxGrantExpiry + " ON " + tblGrants + " (expires_at)",
-			`CREATE TABLE oauth2as_authorization_codes (
-    id TEXT PRIMARY KEY,
-    grant_id TEXT NOT NULL REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
-    valid_until INTEGER NOT NULL,
-    delete_after INTEGER NOT NULL,
-    version INTEGER NOT NULL CHECK (version > 0)
-   )`,
-			"CREATE INDEX " + idxCodeExpiry + " ON " + tblAuthCodes + " (delete_after)",
-			"CREATE INDEX " + idxCodeGrant + " ON " + tblAuthCodes + " (grant_id)",
-			`CREATE TABLE oauth2as_refresh_tokens (
-    id TEXT PRIMARY KEY,
-    grant_id TEXT NOT NULL REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
-    valid_until INTEGER NOT NULL,
-    delete_after INTEGER NOT NULL,
-    replaced_by_id TEXT NOT NULL,
-    version INTEGER NOT NULL CHECK (version > 0)
-   )`,
-			"CREATE INDEX " + idxTokenExpiry + " ON " + tblRefreshTokens + " (delete_after)",
-			"CREATE INDEX " + idxTokenGrant + " ON " + tblRefreshTokens + " (grant_id)",
-			`CREATE TABLE oauth2as_refresh_sessions (
-    grant_id TEXT PRIMARY KEY REFERENCES oauth2as_grants(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL,
-    last_used_at INTEGER NOT NULL,
-    version INTEGER NOT NULL CHECK (version > 0)
-   )`,
-			"CREATE INDEX " + idxSessionActive + " ON " + tblRefreshSessions + " (expires_at, last_used_at, grant_id)",
-		},
-	}}
 }
 
 func jsonArray[T any](v *T) *sqlJSON[T] {

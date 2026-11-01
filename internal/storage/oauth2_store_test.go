@@ -8,9 +8,9 @@ import (
 	"lds.li/passidp/internal/storage"
 )
 
-func TestNewOAuth2Storage(t *testing.T) {
+func TestOAuth2Storage(t *testing.T) {
 	ctx := context.Background()
-	store, err := storage.NewOAuth2Storage(ctx, storage.OpenTest(t))
+	store, err := oauth2as.NewSQLStorage(storage.OpenTest(t))
 	if err != nil {
 		t.Fatal(err)
 	}

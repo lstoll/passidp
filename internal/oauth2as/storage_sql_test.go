@@ -18,10 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"uuid"
-
 	"lds.li/oauth2ext/dpop"
 	"lds.li/oauth2ext/jwt"
+	"lds.li/passidp/internal/storage/migrations"
 	_ "modernc.org/sqlite"
 )
 
@@ -36,35 +35,22 @@ func (clientSource) Client(_ context.Context, clientID string) (*Client, error) 
 	}, nil
 }
 
-// newSQLiteDB returns an isolated shared in-memory database. The DSN pragmas
-// are applied to every connection opened by database/sql.
-func newSQLiteDB(t *testing.T) *sql.DB {
+// newMigratedSQLStorage uses the same migrations as the application.
+func newMigratedSQLStorage(t *testing.T) (*sql.DB, *Storage) {
 	t.Helper()
-	dsn := "file:" + uuid.NewV4().String() + "?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", "file:"+rand.Text()+"?mode=memory&cache=shared&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)")
 	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := migrations.Apply(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
 	db.SetMaxIdleConns(1)
 	db.SetMaxOpenConns(4)
-	t.Cleanup(func() { db.Close() })
-	return db
-}
-
-// newMigratedSQLStorage returns SQLite storage on a fresh database with
-// migrations applied (twice, to check idempotency).
-func newMigratedSQLStorage(t *testing.T) (*sql.DB, *Storage) {
-	t.Helper()
-	db := newSQLiteDB(t)
 	store, err := NewSQLStorage(db)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if err := store.Migrate(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Migrate(t.Context()); err != nil {
-		t.Fatalf("idempotent migrate: %v", err)
 	}
 	return db, store
 }
@@ -352,23 +338,6 @@ func tokenResponse(server *Server, form url.Values, signer *jwt.SigningIdentity)
 		response = map[string]any{"decode_error": err.Error(), "body": rec.Body.String()}
 	}
 	return rec.Code, response
-}
-
-func TestSQLiteMigrateNewerSchema(t *testing.T) {
-	db, store := newMigratedSQLStorage(t)
-
-	var table string
-	if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, "oauth2as_grants").Scan(&table); err != nil {
-		t.Fatalf("grants table missing: %v", err)
-	}
-
-	if _, err := db.Exec(`INSERT INTO oauth2as_schema_migrations (version, name, applied_at) VALUES (99, 'future', '1970-01-01T00:00:00.000000Z')`); err != nil {
-		t.Fatal(err)
-	}
-	err := store.Migrate(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "newer than this library") {
-		t.Fatalf("Migrate() error = %v, want newer-schema error", err)
-	}
 }
 
 func TestSQLStorageConstructorValidation(t *testing.T) {
